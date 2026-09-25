@@ -37,7 +37,7 @@ inspects the serial transcript.
 ## Failure-path checks executed this phase (2026-09-25)
 
 - ISO built without a kernel → loader printed
-  `SYPAS loader error: \\SYPAS\\KERNEL.ELF not found (status
+  `SYPAS loader error: \SYPAS\KERNEL.ELF not found (status
   0x800000000000000E)` and halted. PASS.
 - `make EXTRA_KCFLAGS=-DSYPAS_TEST_FAULT iso` injects `ud2` late in
   boot → kernel panicked with the full truthful dump (`#UD invalid

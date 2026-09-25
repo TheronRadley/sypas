@@ -37,7 +37,7 @@ inspects the serial transcript.
 ## Failure-path checks executed this phase (2026-09-25)
 
 - ISO built without a kernel → loader printed
-  `SYPAS loader error: \SYPAS\KERNEL.ELF not found (status
+  `SYPAS loader error: \\SYPAS\\KERNEL.ELF not found (status
   0x800000000000000E)` and halted. PASS.
 - `make EXTRA_KCFLAGS=-DSYPAS_TEST_FAULT iso` injects `ud2` late in
   boot → kernel panicked with the full truthful dump (`#UD invalid
@@ -45,6 +45,32 @@ inspects the serial transcript.
   CR0–CR4, stack window) and emitted `SYSTEM STATUS: HALTED`. PASS.
   (Automating these negative paths in the test harness is the next
   testing milestone.)
+
+## Media and legacy-BIOS diagnostic tests (2026-09-25)
+
+- `make test-media`: **PASS** without QEMU. The independent parser in
+  `tests/media/validate_media.py` found the ISO9660 primary descriptor at
+  sector 16, the El Torito boot record at sector 17, a valid catalog
+  checksum, a bootable/no-emulation BIOS default entry and a bootable/
+  no-emulation EFI platform `0xEF` section entry. Both catalog payloads
+  were byte-identical to `build/biosstub.bin` and `build/esp.img`; the
+  embedded FAT16 walk found `BOOTX64.EFI` and `KERNEL.ELF` byte-identical
+  to their build outputs.
+- `tests/media/test_bios_stub.py`: **PASS** under Unicorn 2.1.4. The
+  harness captured every INT 10h AH=0Eh byte, matched the complete
+  diagnostic (including VirtualBox/VMware/QEMU guidance), and observed
+  the stub reach HLT.
+- Determinism: **PASS**. Two clean `make iso` builds produced the same
+  SHA-256, `3cb2a6d07fbc543f45b3dbed9f0aeb0b0cdcb352510863c2fdfeda2c95e00d61`.
+
+## UEFI boot re-run status (2026-09-25)
+
+- `make test-boot`: **NOT TESTED in this sandbox turn**. Neither QEMU
+  (`qemu-system-x86_64`) nor the configured OVMF files
+  (`$HOME/firmware/OVMF_CODE.fd` and `OVMF_VARS.fd`) are available here.
+  The existing Phase 2 QEMU/OVMF PASS record above remains historical;
+  this media change was validated structurally and with the no-QEMU
+  Unicorn test, not represented as a new UEFI boot result.
 
 ## Long-run tests
 

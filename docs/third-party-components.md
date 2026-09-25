@@ -18,9 +18,10 @@ running SYPAS system.
 | gcc + binutils | 12.2 / 2.40 | compiler, linker, ELF→PE conversion | GPLv3 (with runtime exception) | mature toolchain; allowed foundation | no | permanent | n/a (toolchains are explicitly allowed infrastructure) |
 | GNU make | 4.3 | build orchestration | GPLv3 | ubiquitous, sufficient | no | permanent | n/a |
 | Python | 3.11 | build tools + test harness | PSF | fast iteration for tooling | no | permanent for tooling | n/a |
-| pycdlib | 1.14 | El Torito (EFI) ISO9660 assembly | LGPLv2.1 | ISO mastering is standards plumbing, not OS architecture | no | could be replaced | write a SYPAS `mkiso` in tools/ if pycdlib ever limits us |
+| pycdlib | 1.14 | dual-entry El Torito (BIOS + EFI) ISO9660 assembly | LGPLv2.1 | ISO mastering is standards plumbing, not OS architecture | no | could be replaced | write a SYPAS `mkiso` in tools/ if pycdlib ever limits us |
 | QEMU | 9.2.4 (built from source) | primary development/test platform | GPLv2 | explicit project decision: QEMU is the virtualization target | no | permanent (dev) | n/a |
 | OVMF (edk2 firmware blobs from the QEMU source tree) | edk2-stable202411 | UEFI firmware for QEMU boot tests | BSD-2-Clause-Patent (+ OpenSSL for crypto parts) | testing SYPAS's real UEFI path requires real UEFI firmware | no | permanent (dev) | n/a |
+| Unicorn | 2.x (test environment) | execute the 16-bit BIOS diagnostic stub and capture INT 10h output | GPLv2 | lightweight CPU emulation makes the BIOS failure path testable without QEMU | no | test-only | replace only if a smaller 16-bit execution harness is needed |
 
 ### Dependencies built only to run QEMU in the dev sandbox
 

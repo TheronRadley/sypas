@@ -32,8 +32,9 @@ SYPAS kernel            (kernel/, x86_64)
   software-interrupt dispatch self-test, bitmap physical page allocator
   with an alloc/free/uniqueness self-test, framebuffer text console,
   serial console.
-- Reproducible boot media: deterministic FAT16 ESP + El Torito EFI ISO
-  built by SYPAS's own tooling (`tools/mkfat.py`, `tools/mkiso.py`).
+- Reproducible boot media: deterministic FAT16 ESP + dual-entry El Torito
+  ISO built by SYPAS's own tooling (`tools/mkfat.py`, `tools/mkiso.py`).
+  Legacy BIOS selects a diagnostic stub; UEFI selects the real ESP.
 - Automated boot test matrix (1/2/4 CPUs, 1/2/4 GiB) with
   machine-readable results: `make test-boot`.
 
@@ -48,15 +49,17 @@ those layers.
 ## Building
 
 Requirements: gcc + binutils (x86_64 host), GNU make, Python 3.9+,
-`pycdlib` (ISO assembly only).  For `make run`/`make test-boot`:
-QEMU (x86_64-softmmu) and OVMF firmware — paths overridable via
-`QEMU`, `OVMF_CODE`, `OVMF_VARS`.  See docs/toolchain.md.
+`pycdlib` (ISO assembly only).  `make test-media` additionally needs the
+[test-only] Unicorn Python package (`pip install unicorn`).  For
+`make run`/`make test-boot`: QEMU (x86_64-softmmu) and OVMF firmware — paths
+overridable via `QEMU`, `OVMF_CODE`, `OVMF_VARS`.  See docs/toolchain.md.
 
 ```
 make            # build everything -> release/sypas-0.1.0.iso
 make run        # boot in QEMU (4 CPUs / 4 GiB)
 make run-lowend # boot with 2 CPUs / 2 GiB
-make test-boot  # automated boot matrix, JSON output
+make test-media # ISO/FAT/catalog checks + Unicorn BIOS-stub test
+make test-boot  # automated UEFI boot matrix, JSON output
 ```
 
 A prebuilt bootable image is checked in at `release/sypas-0.1.0.iso`.
@@ -69,15 +72,32 @@ qemu-system-x86_64 -machine q35 -m 2048 -smp 2 \
   -cdrom release/sypas-0.1.0.iso -serial stdio
 ```
 
+## VirtualBox (legacy BIOS warning)
+
+SYPAS is UEFI-only. A default VirtualBox VM often starts in legacy BIOS
+mode; with the dual-entry ISO it will now print a diagnostic instead of
+ending at "No bootable medium found!". Before starting the VM:
+
+1. Open **Settings > System > Motherboard**.
+2. Check **Enable EFI (special OSes only)**.
+3. Set **Base Memory** to **2048 MB** or more, then restart the VM.
+4. Attach `release/sypas-0.1.0.iso` as the optical disk.
+
+For VMware, select **Firmware type: UEFI**. For QEMU, boot with OVMF as in
+the command above. The BIOS image is only a helpful failure-path message;
+it is not a BIOS port of SYPAS.
+
 ## Repository map
 
 ```
 bootloader/uefi/       SYPAS UEFI loader (C + minimal asm, no gnu-efi)
+bootloader/bios/       legacy-BIOS diagnostic stub (not a SYPAS BIOS port)
 bootloader/protocols/  SYPAS Boot Protocol v1 (shared header)
 kernel/                SYPAS kernel (C17 + x86_64 asm)
 tools/                 image tooling (FAT16 + ISO builders)
 scripts/               run/dev scripts
-tests/boot/            automated boot tests
+tests/boot/            automated UEFI boot tests
+tests/media/           independent ISO/FAT checks + BIOS-stub test
 benchmarks/            measurement harnesses and recorded results
 docs/                  architecture, decisions, measurements
 release/               bootable images

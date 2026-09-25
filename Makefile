@@ -3,12 +3,14 @@
 # Targets:
 #   make                 build bootloader + kernel + ESP + ISO
 #   make bootloader      SYPAS UEFI loader (BOOTX64.EFI)
+#   make biosstub        legacy-BIOS diagnostic image (biosstub.bin)
 #   make kernel          SYPAS kernel (kernel.elf)
 #   make esp             FAT16 EFI system partition image
-#   make iso             bootable ISO (release/sypas-$(VERSION).iso)
+#   make iso             dual-entry bootable ISO (release/sypas-$(VERSION).iso)
 #   make run             boot the ISO in QEMU (normal profile: 4 CPU/4G)
 #   make run-lowend      boot with the low-end profile (2 CPU/2G)
-#   make test-boot       automated boot test matrix (machine-readable)
+#   make test-media      validate ISO/catalog/FAT and execute BIOS stub
+#   make test-boot       automated UEFI boot test matrix (machine-readable)
 #   make clean
 #
 # Toolchain: gcc + binutils (see docs/toolchain.md).  QEMU + OVMF paths
@@ -24,10 +26,24 @@ PYTHON  := python3
 BUILD   := build
 RELEASE := release
 ISO     := $(RELEASE)/sypas-$(VERSION).iso
+BIOSSTUB := $(BUILD)/biosstub.bin
 
 QEMU      ?= $(HOME)/sysroot/bin/qemu-system-x86_64
 OVMF_CODE ?= $(HOME)/firmware/OVMF_CODE.fd
 OVMF_VARS ?= $(HOME)/firmware/OVMF_VARS.fd
+
+# ---- Legacy BIOS diagnostic image -------------------------------------------
+
+BIOS_DIR := bootloader/bios
+
+$(BUILD)/bios/stub.o: $(BIOS_DIR)/stub.S
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -c $< -o $@
+
+$(BIOSSTUB): $(BUILD)/bios/stub.o
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_i386 -Ttext 0x7C00 --oformat binary -e start -o $@ $<
+	@test "$$(wc -c < $@)" -eq 2048
 
 # ---- Bootloader (PE32+ via ELF shared object + objcopy) --------------------
 
@@ -61,11 +77,12 @@ KRN_CFLAGS := -std=c17 -O2 -g -Wall -Wextra -ffreestanding -fno-pic -fno-pie \
               -mgeneral-regs-only -mcmodel=small \
               -fno-asynchronous-unwind-tables -nostdlib -MMD $(EXTRA_KCFLAGS)
 
-.PHONY: all bootloader kernel esp iso run run-lowend test-boot benchmark clean
+.PHONY: all bootloader biosstub kernel esp iso run run-lowend test-media test-boot benchmark clean
 
 all: iso
 
 bootloader: $(BUILD)/BOOTX64.EFI
+biosstub:   $(BIOSSTUB)
 kernel:     $(BUILD)/kernel.elf
 esp:        $(BUILD)/esp.img
 iso:        $(ISO)
@@ -108,9 +125,9 @@ $(BUILD)/esp.img: $(BUILD)/BOOTX64.EFI $(BUILD)/kernel.elf tools/mkfat.py
 	    $(BUILD)/BOOTX64.EFI=/EFI/BOOT/BOOTX64.EFI \
 	    $(BUILD)/kernel.elf=/SYPAS/KERNEL.ELF
 
-$(ISO): $(BUILD)/esp.img tools/mkiso.py
+$(ISO): $(BUILD)/biosstub.bin $(BUILD)/esp.img tools/mkiso.py
 	@mkdir -p $(RELEASE)
-	$(PYTHON) tools/mkiso.py $@ $(BUILD)/esp.img \
+	$(PYTHON) tools/mkiso.py $@ $(BUILD)/esp.img $(BUILD)/biosstub.bin \
 	    '$(BUILD)/kernel.elf=/KERNEL.ELF;1'
 	@ls -la $(ISO)
 
@@ -120,6 +137,12 @@ run: iso
 
 run-lowend: iso
 	scripts/run-qemu.sh lowend $(ISO)
+
+test-media: $(ISO)
+	$(PYTHON) tests/media/validate_media.py --iso $(ISO) \
+	    --bios $(BUILD)/biosstub.bin --esp $(BUILD)/esp.img \
+	    --bootloader $(BUILD)/BOOTX64.EFI --kernel $(BUILD)/kernel.elf
+	$(PYTHON) tests/media/test_bios_stub.py --stub $(BUILD)/biosstub.bin
 
 test-boot: iso
 	$(PYTHON) tests/boot/boot_test.py --iso $(ISO) \

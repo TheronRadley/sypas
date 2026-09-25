@@ -31,8 +31,8 @@ How to replace later.
 ## DR-2: Boot protocol is a versioned single struct, physical pointers
 
 - **Decision:** one packed, versioned, grow-only structure
-  (`sypas_bootinfo_t`) with physical addresses valid under the
-  firmware identity map.
+  (`sypas_bootinfo_t`) with physical addresses valid under the firmware
+  identity map.
 - **Why:** explicit, testable contract; no undocumented assumptions.
 - **Complexity:** low. **Costs:** one 4 KiB page + map buffers.
 - **Alternatives:** Multiboot2 (foreign semantics, legacy baggage),
@@ -42,11 +42,11 @@ How to replace later.
 
 ## DR-3: v1 kernel runs on firmware identity mapping, linked at 4 MiB
 
-- **Decision:** defer kernel-owned page tables to Phase 4; keep
-  EFI boot-services memory reserved meanwhile; kernel is non-PIE at a
-  fixed physical address the loader allocates explicitly.
-- **Why:** smallest honest step to a running, testable kernel; page
-  tables deserve their own tested phase rather than a rushed version.
+- **Decision:** defer kernel-owned page tables to Phase 4; keep EFI
+  boot-services memory reserved meanwhile; kernel is non-PIE at a fixed
+  physical address the loader allocates explicitly.
+- **Why:** smallest honest step to a running, testable kernel; page tables
+  deserve their own tested phase rather than a rushed version.
 - **RAM cost:** real — firmware memory stays reserved (measured ~66 MiB
   of 2 GiB held by `SYPAS_MEM_FIRMWARE` + loader under OVMF; see
   docs/performance.md). Reclaimed in Phase 4.
@@ -54,8 +54,8 @@ How to replace later.
   (loader fails loudly if 4 MiB is taken — has not occurred on OVMF).
 - **Alternatives:** loader-built page tables now. Rejected: increases
   the untested surface of the very first boot milestone.
-- **Replace later:** Phase 4 builds kernel page tables, moves the
-  kernel higher-half, reclaims firmware + loader memory.
+- **Replace later:** Phase 4 builds kernel page tables, moves the kernel
+  higher-half, reclaims firmware + loader memory.
 
 ## DR-4: Bring-up interrupts on 8259 PIC + PIT (100 Hz)
 
@@ -73,12 +73,10 @@ How to replace later.
 
 ## DR-5: Physical memory = bitmap allocator with next-fit cursor
 
-- **Decision:** 1 bit per 4 KiB page, next-fit scan, byte-skip fast
-  path.
+- **Decision:** 1 bit per 4 KiB page, next-fit scan, byte-skip fast path.
 - **Why:** correct, small (64 KiB of bitmap per 2 GiB RAM), trivially
   testable; performance measured (~112 cycles/alloc, ~46 cycles/free —
-  see docs/performance.md) is far from being a bottleneck at this
-  phase.
+  see docs/performance.md) is far from being a bottleneck at this phase.
 - **Disadvantages:** O(n) worst case when nearly full; no locality/zone
   awareness; no contiguous multi-page allocation API yet.
 - **Alternatives:** buddy allocator (more code, unneeded until we have
@@ -99,15 +97,15 @@ How to replace later.
 
 ## DR-7: Deterministic SYPAS-owned image tooling (mkfat.py / mkiso.py)
 
-- **Decision:** SYPAS builds its own FAT16 ESP writer; ISO mastering
-  uses pycdlib.
+- **Decision:** SYPAS builds its own FAT16 ESP writer; ISO mastering uses
+  pycdlib.
 - **Why:** dev sandbox lacks mtools/xorriso; more importantly,
   deterministic media (fixed timestamps/ids) makes boot images
   byte-reproducible, which the release process will depend on.
 - **Disadvantages:** our FAT writer supports 8.3 names only (boot files
   are named to fit, deliberately).
-- **Verification:** independent Python FAT parser + OVMF itself reads
-  the volume (boot tests).
+- **Verification:** independent Python FAT parser + OVMF itself reads the
+  volume (boot tests).
 - **Replace later:** mkiso in native tooling if pycdlib limits us.
 
 ## DR-8: QEMU 9.2.4 + OVMF (edk2-stable202411) as the test platform
@@ -118,3 +116,31 @@ How to replace later.
 - **Why:** honest, reproducible, automatable in the sandbox.
 - **Replace later:** hardware matrix per docs/hardware-target.md when
   physical machines are available.
+
+## DR-9: BIOS El Torito entry is a diagnostic stub, not a BIOS port
+
+- **Decision:** make the default El Torito catalog entry a 2048-byte,
+  16-bit real-mode image that prints the UEFI-only requirement and halts;
+  put the real FAT16 ESP in a bootable EFI platform (0xEF) section entry.
+  The stub is linked at 0x7C00 and uses only BIOS INT 10h AH=0Eh.
+- **Why:** a legacy-BIOS VM otherwise reports the unhelpful firmware-level
+  "No bootable medium found!". A deterministic message gives VirtualBox,
+  VMware, and QEMU users the exact firmware setting to change while
+  preserving SYPAS's UEFI-only architecture.
+- **Expected RAM cost:** one 2 KiB ISO payload, loaded only on the failure
+  path. **Expected CPU cost:** one BIOS teletype call per message byte,
+  then zero (HLT loop).
+- **Expected complexity:** low and isolated; `make test-media` validates
+  both catalog entries and executes the image under Unicorn without QEMU.
+- **Advantages:** useful failure diagnostics, no BIOS compatibility claims,
+  no changes to the UEFI boot protocol or kernel, deterministic media.
+- **Disadvantages:** text is BIOS/code-page dependent and cannot recover or
+  boot SYPAS; very old firmware may still ignore nonstandard El Torito
+  behavior.
+- **Alternatives:** continue emitting an EFI-only catalog (rejected:
+  leaves users with a misleading firmware error), or port the loader to
+  BIOS/CSM (rejected: violates the UEFI-only target and creates a second
+  boot ABI).
+- **Replace later:** if SYPAS ever chooses a different media masterer, keep
+  the stub ABI and catalog ordering; replace only the ISO plumbing after
+  equivalent independent media tests exist.

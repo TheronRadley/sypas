@@ -26,7 +26,9 @@ import time
 
 CONFIGS = [
     {"name": "lowend", "smp": 2, "mem": 2048},
-    {"name": "normal", "smp": 4, "mem": 4096},
+    # 4 GiB guests exceed the dev sandbox host RAM (3.9 GiB); the
+    # 4-CPU config runs at 3 GiB there. Override on larger hosts.
+    {"name": "normal", "smp": 4, "mem": 3072},
     {"name": "single", "smp": 1, "mem": 1024},
 ]
 

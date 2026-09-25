@@ -21,9 +21,10 @@ docs/performance.md).
 
 | Configuration | Firmware | Status |
 |---|---|---|
-| QEMU q35, TCG, 1 CPU, 1 GiB | OVMF (edk2-stable202411) | ✅ boot test PASS |
-| QEMU q35, TCG, 2 CPU, 2 GiB (low-end profile) | OVMF | ✅ boot test PASS |
-| QEMU q35, TCG, 4 CPU, 4 GiB (normal profile) | OVMF | ✅ boot test PASS |
+| QEMU q35, TCG, 1 CPU, 1 GiB | OVMF (edk2-stable202411) | ✅ boot test PASS (2026-09-25) |
+| QEMU q35, TCG, 2 CPU, 2 GiB (low-end profile) | OVMF | ✅ boot test PASS (2026-09-25) |
+| QEMU q35, TCG, 4 CPU, 3 GiB | OVMF | ✅ boot test PASS (2026-09-25) |
+| QEMU q35, 4 CPU, 4 GiB (normal profile) | OVMF | ⚠ NOT RUN: dev sandbox host has 3.9 GiB RAM and cannot back a 4 GiB guest; run `make test-boot` on a larger host |
 | Any physical machine | — | ❌ NOT TESTED |
 
 SMP note: multi-CPU configs currently verify that the kernel boots and

@@ -129,6 +129,14 @@ void kmain(const sypas_bootinfo_t *bi)
         panic("pit: timer not ticking (delta=%lu)", delta);
     kprintf("[pit ] 100 Hz timer alive: %lu IRQs in 250 ms window\n", delta);
 
+#ifdef SYPAS_TEST_FAULT
+    /* Fault-injection hook for the panic-path test
+     * (make test-kernel-fault): prove that a CPU exception produces a
+     * complete, truthful register dump instead of a silent wedge. */
+    kprintf("[test] injecting #UD for panic-path verification\n");
+    __asm__ volatile("ud2");
+#endif
+
     /* --- Milestone banner --------------------------------------------------------- */
     kprintf("\nSYPAS\n=====\n\n");
     kprintf("Bootloader: OK   (SYPAS UEFI loader, boot protocol v1)\n");

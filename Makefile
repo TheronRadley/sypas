@@ -59,7 +59,7 @@ KRN_OBJS  := $(patsubst %.c,$(BUILD)/%.o,$(KRN_CSRCS)) \
 KRN_CFLAGS := -std=c17 -O2 -g -Wall -Wextra -ffreestanding -fno-pic -fno-pie \
               -fno-stack-protector -fno-stack-check -mno-red-zone \
               -mgeneral-regs-only -mcmodel=small \
-              -fno-asynchronous-unwind-tables -nostdlib -MMD
+              -fno-asynchronous-unwind-tables -nostdlib -MMD $(EXTRA_KCFLAGS)
 
 .PHONY: all bootloader kernel esp iso run run-lowend test-boot benchmark clean
 

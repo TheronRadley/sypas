@@ -80,7 +80,8 @@ def main():
     out = {"method": "wall clock QEMU start -> serial RUNNING marker",
            "accel": "TCG (no KVM in sandbox)", "machine": "q35, -cpu max",
            "configs": []}
-    for smp, mem in [(2, 2048), (4, 4096)]:
+    # 4 GiB guests exceed the dev sandbox host RAM; 4-CPU runs at 3 GiB.
+    for smp, mem in [(2, 2048), (4, 3072)]:
         walls, kinits = [], []
         for _ in range(args.runs):
             w, k = one_boot(args, smp, mem)

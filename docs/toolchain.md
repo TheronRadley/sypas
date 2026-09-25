@@ -53,9 +53,9 @@ lowend 2 CPU/2 GiB, normal 4 CPU/4 GiB, upper 8 CPU/8 GiB — all
 ## Reproducibility
 
 - `tools/mkfat.py` emits deterministic FAT16 images (fixed timestamps,
-  fixed volume id).
-- Build inputs are pinned by version above; `make clean && make`
-  regenerates the ISO from sources.
+  fixed volume id); `tools/mkiso.py` freezes the mastering clock.
+- Verified: two `make clean && make iso` runs produce byte-identical
+  ISOs (sha256 `39347b2c…d373cc` for v0.1.0).
 
 ## Not yet in place (honest gaps)
 

@@ -34,13 +34,17 @@ inspects the serial transcript.
 | `int $0x80` ×2 counted | IDT dispatch actually works |
 | PIT 250 ms tick count | external interrupt delivery actually works |
 
-## Failure-path checks done manually this phase
+## Failure-path checks executed this phase (2026-09-25)
 
-- Deliberately corrupted kernel path (file renamed) → loader reports
-  `\SYPAS\KERNEL.ELF not found` + status code and halts. (Automated in
-  the negative-path suite planned next phase.)
-- Panic path exercised via test build with a forced `#UD`; full
-  register dump verified on serial and framebuffer.
+- ISO built without a kernel → loader printed
+  `SYPAS loader error: \SYPAS\KERNEL.ELF not found (status
+  0x800000000000000E)` and halted. PASS.
+- `make EXTRA_KCFLAGS=-DSYPAS_TEST_FAULT iso` injects `ud2` late in
+  boot → kernel panicked with the full truthful dump (`#UD invalid
+  opcode`, vector 6, RIP inside kernel text, CS=0008, all GPRs,
+  CR0–CR4, stack window) and emitted `SYSTEM STATUS: HALTED`. PASS.
+  (Automating these negative paths in the test harness is the next
+  testing milestone.)
 
 ## Long-run tests
 

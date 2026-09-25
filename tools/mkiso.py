@@ -11,6 +11,13 @@ Usage: mkiso.py OUTPUT ESP_IMAGE [SRC=/ISO/PATH ...]
 """
 
 import sys
+import time
+
+# Deterministic output: pycdlib stamps volume/directory dates with "now".
+# Freeze the clock (2025-09-25 12:00:00 UTC) so rebuilding identical
+# inputs yields a byte-identical ISO.
+_FIXED_TIME = 1758801600.0
+time.time = lambda: _FIXED_TIME
 
 import pycdlib
 

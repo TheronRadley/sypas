@@ -7,11 +7,28 @@
 - Failures are never hidden: the report format in every development
   report includes PASS/FAIL per category and "NOT TESTED" where true.
 
+## Test entry points
+
+| Command | What it runs | Needs |
+|---|---|---|
+| `make test` | everything feasible on this machine (skips QEMU tiers with an explicit SKIP message if QEMU/OVMF are absent) | — |
+| `make test-unit` | host unit tests: loader ELF validator vs. malformed images (ASan/UBSan), boot protocol layout + `SYPAS_BI_HAS` rules | gcc |
+| `make test-media` | independent ISO/El Torito/FAT parser + BIOS stub execution under Unicorn | python |
+| `make test-boot` | UEFI boot matrix, serial-transcript validation, JSON output | QEMU + OVMF |
+| `make test-kernel-fault` (alias `test-faults`) | fault-injected build must panic truthfully (see below) | QEMU + OVMF |
+| `make doctor` | reports exactly which of the above your environment can run | python |
+
+CI (`.github/workflows/ci.yml`) runs all of these on every push/PR,
+plus a build-determinism check, and uploads the JSON results and
+serial transcripts as artifacts.
+
 ## Boot test matrix (`make test-boot`)
 
 `tests/boot/boot_test.py` boots the release ISO under OVMF in QEMU for
-each configuration in the matrix (currently 1 CPU/1 GiB, 2/2, 4/4) and
-inspects the serial transcript.
+each configuration in **`tests/config/matrix.json`** — the single
+source of truth for the machine matrix (the same file drives
+`benchmarks/boot/run.py` and `scripts/run-qemu.sh`; docs quote it, not
+the other way around) — and inspects the serial transcript.
 
 - **PASS** requires the literal `SYSTEM STATUS: RUNNING` marker, which
   the kernel prints only after: boot protocol validation, GDT/IDT
@@ -34,17 +51,26 @@ inspects the serial transcript.
 | `int $0x80` ×2 counted | IDT dispatch actually works |
 | PIT 250 ms tick count | external interrupt delivery actually works |
 
-## Failure-path checks executed this phase (2026-09-25)
+## Negative-path tests (automated: `make test-kernel-fault`)
 
-- ISO built without a kernel → loader printed
-  `SYPAS loader error: \SYPAS\KERNEL.ELF not found (status
-  0x800000000000000E)` and halted. PASS.
-- `make EXTRA_KCFLAGS=-DSYPAS_TEST_FAULT iso` injects `ud2` late in
-  boot → kernel panicked with the full truthful dump (`#UD invalid
-  opcode`, vector 6, RIP inside kernel text, CS=0008, all GPRs,
-  CR0–CR4, stack window) and emitted `SYSTEM STATUS: HALTED`. PASS.
-  (Automating these negative paths in the test harness is the next
-  testing milestone.)
+`make test-kernel-fault` builds a separate ISO with
+`-DSYPAS_TEST_FAULT` (a `ud2` injected late in boot) into
+`build/fault/`, boots it, and passes only if the transcript shows
+`SYPAS KERNEL PANIC` **and** a real register dump (`RIP=`, `CR0=`
+lines) **and** `SYSTEM STATUS: HALTED` — a panic without the dump, a
+wedge, or a system that reaches RUNNING all fail
+(`tests/boot/boot_test.py --expect-panic`).
+
+Loader negative paths covered without QEMU by `make test-unit`: the
+ELF validator rejects truncated headers, bad class/endian/machine/
+type, out-of-bounds program headers and segments, `p_filesz >
+p_memsz`, address-arithmetic overflows, page-overlapping and excessive
+segments, and entry points outside loaded segments — plus every
+load-critical truncation of the real `kernel.elf`.
+
+Manually verified earlier (2026-09-25): ISO built without a kernel →
+`SYPAS loader error: \SYPAS\KERNEL.ELF not found (status
+0x800000000000000E)`, halted. PASS.
 
 ## Media and legacy-BIOS diagnostic tests (2026-09-25)
 

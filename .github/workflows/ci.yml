@@ -1,0 +1,112 @@
+# SYPAS continuous integration.
+#
+# Every push/PR: build with warnings-as-errors, run host unit tests,
+# validate the boot media structurally, prove the build is deterministic,
+# then boot the ISO under OVMF/QEMU across the machine matrix
+# (tests/config/matrix.json) and run the fault-injection negative path.
+# Serial transcripts and machine-readable JSON results are uploaded as
+# artifacts on every run, pass or fail.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+defaults:
+  run:
+    shell: bash   # explicit bash => -o pipefail, so `make ... | tee` fails properly
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain, QEMU and OVMF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              gcc make binutils qemu-system-x86 ovmf jq
+          pip install -r tools/requirements-dev.txt
+
+      - name: Locate OVMF firmware
+        run: |
+          set -e
+          for c in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
+            if [ -f "$c" ]; then echo "OVMF_CODE=$c" >> "$GITHUB_ENV"; break; fi
+          done
+          for v in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do
+            if [ -f "$v" ]; then echo "OVMF_VARS=$v" >> "$GITHUB_ENV"; break; fi
+          done
+          echo "QEMU=$(command -v qemu-system-x86_64)" >> "$GITHUB_ENV"
+
+      - name: Toolchain version report
+        run: |
+          mkdir -p ci-artifacts
+          { gcc --version | head -1
+            ld --version | head -1
+            objcopy --version | head -1
+            make --version | head -1
+            python3 --version
+            qemu-system-x86_64 --version | head -1
+            pip freeze | grep -Ei 'pycdlib|unicorn'
+            echo "OVMF_CODE=$OVMF_CODE"
+          } | tee ci-artifacts/toolchain.txt
+
+      - name: Environment doctor
+        run: make doctor QEMU="$QEMU" OVMF_CODE="$OVMF_CODE" OVMF_VARS="$OVMF_VARS"
+
+      - name: Build (warnings are errors)
+        run: make WERROR=1 iso
+
+      - name: Host unit tests (ELF validator, boot protocol layout)
+        run: make WERROR=1 test-unit
+
+      - name: Media validation (independent ISO/FAT parser + BIOS stub emulation)
+        run: make test-media
+
+      - name: Determinism check (two clean builds, identical SHA-256)
+        run: |
+          set -e
+          sha1=$(sha256sum release/sypas-*.iso | awk '{print $1}')
+          make clean >/dev/null && make iso >/dev/null
+          sha2=$(sha256sum release/sypas-*.iso | awk '{print $1}')
+          echo "build1=$sha1"; echo "build2=$sha2"
+          test "$sha1" = "$sha2"
+          echo "$sha1" > ci-artifacts/iso.sha256
+
+      - name: UEFI boot test matrix
+        run: |
+          make test-boot QEMU="$QEMU" OVMF_CODE="$OVMF_CODE" OVMF_VARS="$OVMF_VARS" \
+            | tee ci-artifacts/boot-test.json
+
+      - name: Fault injection (kernel #UD must panic truthfully)
+        run: |
+          make test-kernel-fault QEMU="$QEMU" OVMF_CODE="$OVMF_CODE" OVMF_VARS="$OVMF_VARS" \
+            | tee ci-artifacts/fault-test.json
+
+      - name: Collect serial logs
+        if: always()
+        run: |
+          mkdir -p ci-artifacts/serial
+          for j in ci-artifacts/boot-test.json ci-artifacts/fault-test.json; do
+            [ -f "$j" ] || continue
+            # the JSON is preceded by make's command echo; extract from first '{'
+            sed -n '/^{/,$p' "$j" | jq -r '.results[].serial_log' 2>/dev/null | \
+            while read -r log; do
+              [ -f "$log" ] && cp "$log" "ci-artifacts/serial/$(basename "$(dirname "$log")").log"
+            done
+          done
+          true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sypas-ci-results
+          path: ci-artifacts/
+          if-no-files-found: warn

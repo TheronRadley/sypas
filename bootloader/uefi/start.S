@@ -17,16 +17,23 @@
  *   RDI = image load base, RSI = &_DYNAMIC
  *   Clobbers caller-saved SysV registers; RCX/RDX are caller-saved in
  *   SysV, so they are preserved on the stack across the call.
+ *   Returns 0 on success, nonzero if the image contains a relocation
+ *   type it cannot apply (build error — refuse to run corrupt code).
  *
- * efi_main is declared __attribute__((ms_abi)) in C and receives the
- * original RCX/RDX via a tail jump (the firmware return address is still
- * on the stack, so efi_main returns straight to the firmware).
+ * efi_main is declared __attribute__((ms_abi)) in C and is called with
+ * a proper Microsoft x64 frame: this wrapper, as the caller,
+ * reserves the 32-byte home/shadow area for the four register argument
+ * slots that the MS-ABI callee is entitled to spill into, with RSP
+ * 16-byte aligned at the call.  We do not rely on any particular
+ * firmware tolerating a missing home area.  efi_main's EFI_STATUS is
+ * returned to the firmware.
  */
 
     .text
     .globl _start
     .type  _start, @function
 _start:
+    /* Firmware CALLed us: RSP % 16 == 8 here. */
     pushq   %rcx                    /* save ImageHandle   (rsp%16 -> 0) */
     pushq   %rdx                    /* save SystemTable   (rsp%16 -> 8) */
     subq    $8, %rsp                /* align for SysV call (rsp%16 -> 0) */
@@ -34,11 +41,26 @@ _start:
     leaq    ImageBase(%rip), %rdi   /* actual load base */
     leaq    _DYNAMIC(%rip),  %rsi   /* dynamic section  */
     call    sypas_reloc
+    testq   %rax, %rax
+    jnz     .Lbad_reloc
 
     addq    $8, %rsp
     popq    %rdx                    /* restore SystemTable  */
     popq    %rcx                    /* restore ImageHandle  */
-    jmp     efi_main                /* tail call, ms_abi    */
+
+    /* MS-ABI call: 32-byte home space + 8 to align (rsp%16 was 8). */
+    subq    $40, %rsp
+    call    efi_main
+    addq    $40, %rsp
+    ret                             /* EFI_STATUS in RAX -> firmware */
+
+.Lbad_reloc:
+    /* Unsupported relocation: the image would run with unrelocated
+     * pointers.  Refuse cleanly instead of executing garbage.  We can't
+     * print (nothing is relocated yet), so return EFI_LOAD_ERROR. */
+    addq    $24, %rsp               /* drop pad + saved rdx/rcx */
+    movabsq $0x8000000000000001, %rax   /* EFI_LOAD_ERROR */
+    ret
     .size _start, . - _start
 
 /*

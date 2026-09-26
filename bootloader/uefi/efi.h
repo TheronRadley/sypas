@@ -74,6 +74,7 @@ typedef enum {
     EfiMemoryMappedIOPortSpace,
     EfiPalCode,
     EfiPersistentMemory,
+    EfiUnacceptedMemoryType,   /* UEFI 2.9+: unaccepted (TDX/SEV-SNP) RAM */
     EfiMaxMemoryType
 } EFI_MEMORY_TYPE;
 

@@ -40,17 +40,24 @@ void kmain(const sypas_bootinfo_t *bi)
     if (serial_ok)
         kprintf("[uart] COM1 115200 8N1, loopback self-test passed\n");
 
-    /* --- Boot protocol ------------------------------------------------ */
+    /* --- Boot protocol ------------------------------------------------
+     * Compatibility rule (sypas_bootproto.h): refuse an unknown major;
+     * accept any minor >= the one we were built against (the structure
+     * only grows within a major, and fields newer than our minor are
+     * probed with SYPAS_BI_HAS before use); require at least the v1.0
+     * prefix this kernel needs. */
     if (!bi)
         panic("boot: NULL bootinfo");
     if (bi->magic != SYPAS_BOOT_MAGIC)
         panic("boot: bad magic %lx", bi->magic);
-    if (bi->version != SYPAS_BOOT_VERSION)
-        panic("boot: unsupported protocol version %u", bi->version);
-    if (bi->size < sizeof(*bi))
-        panic("boot: short bootinfo (%u bytes)", bi->size);
-    kprintf("[boot] SYPAS boot protocol v%u, bootinfo at %p\n",
-            bi->version, (const void *)bi);
+    if (bi->version_major != SYPAS_BOOT_VERSION_MAJOR)
+        panic("boot: unsupported protocol major %u (kernel speaks %u)",
+              bi->version_major, SYPAS_BOOT_VERSION_MAJOR);
+    if (bi->size < SYPAS_BOOTINFO_V1_0_SIZE)
+        panic("boot: short bootinfo (%u bytes, need %u)",
+              bi->size, (u32)SYPAS_BOOTINFO_V1_0_SIZE);
+    kprintf("[boot] SYPAS boot protocol v%u.%u, bootinfo at %p\n",
+            bi->version_major, bi->version_minor, (const void *)bi);
     kprintf("[boot] kernel image: base=%lx size=%lu KiB, stack=%lx\n",
             bi->kernel_phys_base, bi->kernel_size / 1024, bi->stack_base);
     if (bi->cmdline[0])
@@ -158,8 +165,10 @@ void kmain(const sypas_bootinfo_t *bi)
         u64 now = timer_ticks();
         if (now - last_beat >= 10 * PIT_HZ) {
             last_beat = now;
+            pmm_stats_t s;
+            pmm_get_stats(&s);
             kprintf("[idle] uptime %lu s, free pages %lu\n",
-                    now / PIT_HZ, ({ pmm_stats_t s; pmm_get_stats(&s); s.free_pages; }));
+                    now / PIT_HZ, s.free_pages);
         }
     }
 }

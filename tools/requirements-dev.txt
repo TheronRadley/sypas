@@ -1,0 +1,11 @@
+# SYPAS Python development/test dependencies — pinned for reproducibility.
+# Install: pip install -r tools/requirements-dev.txt
+#
+# pycdlib : ISO mastering (tools/mkiso.py)
+# unicorn : 16-bit emulation for the BIOS diagnostic stub test
+#           (tests/media/test_bios_stub.py)
+#
+# The build itself (mkfat.py) and the media validator
+# (tests/media/validate_media.py) are stdlib-only by design.
+pycdlib==1.21.0
+unicorn==2.1.4

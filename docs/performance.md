@@ -3,6 +3,19 @@
 Rule: numbers only with context. Every entry states configuration,
 method, and result. No number here is a projection.
 
+This file is the **single source of truth for measured numbers**;
+other documents (e.g. docs/technology-decisions.md) reference it
+instead of quoting their own copies.
+
+> **Staleness note (2026-09-26):** everything below was measured on
+> `release/sypas-0.1.0.iso`. The boot-hardening changes after 0.1.0
+> alter the memory footprint — the kernel no longer carves a second
+> 64 KiB boot stack in `.bss` (it runs on the loader-provided stack
+> per the boot protocol), and the loader now tags the kernel image
+> `SYPAS_MEM_KERNEL` in the handoff map. Footprint rows will be
+> re-measured for the next tagged release; boot-time and PMM numbers
+> are regression baselines and are re-validated by CI on every push.
+
 ## Test environment (all measurements below)
 
 - QEMU 9.2.4, `-machine q35 -cpu max`, **TCG** (no KVM available in the

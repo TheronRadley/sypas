@@ -11,7 +11,12 @@ SYPAS bootloader per the boot protocol (RDI = bootinfo, long mode,
 interrupts off, firmware identity paging). It establishes:
 
 - DF clear, interrupts masked
-- a kernel-owned 64 KiB `.bss` stack, 16-byte aligned
+- RSP 16-byte aligned **on the loader-provided boot stack** — the
+  dedicated 64 KiB stack the boot protocol hands over
+  (`bi->stack_base/stack_size`). The kernel keeps this stack (that is
+  the contract; a duplicate `.bss` boot stack would waste 64 KiB and
+  make the protocol fields dead surface) until it owns page tables and
+  switches to a kernel-owned stack (Phase 4).
 - zeroed RBP (unwind terminator)
 
 then calls `kmain(const sypas_bootinfo_t *)` which never returns.
@@ -21,16 +26,20 @@ then calls `kmain(const sypas_bootinfo_t *)` which never returns.
 1. **Serial (COM1)** — first, so every later failure is observable.
    Presence is probed (scratch register + loopback) so machines without
    a UART skip cleanly.
-2. **Boot protocol validation** — magic, version, size. Any mismatch
-   panics: booting with a misunderstood contract is worse than not
-   booting.
+2. **Boot protocol validation** — magic, major version (unknown major
+   → refuse; newer minor within the known major → accept), and `size`
+   against the required v1.0 prefix. Any mismatch panics: booting with
+   a misunderstood contract is worse than not booting.
 3. **CPU identification** — CPUID vendor/brand/family and the feature
    bits the near-term roadmap needs (TSC, APIC, SSE2, NX, 1G pages).
 4. **GDT** — ring-0 code/data, segments reloaded via `lretq`.
 5. **IDT** — all 32 exception vectors + 16 IRQ vectors + vector 0x80
    (self-test gate, future syscall vector). Exceptions land in
    `panic_with_frame` with a complete register dump.
-6. **PIC** — remapped to vectors 32–47, fully masked.
+6. **PIC** — remapped to vectors 32–47, fully masked. Spurious IRQ7/
+   IRQ15 are detected via the in-service register and handled with the
+   8259A's asymmetric rules (no EOI for spurious IRQ7, master-only EOI
+   for spurious IRQ15); they are counted and never reach a handler.
 7. **Memory map + PMM** — see docs/memory.md; runs a mandatory
    self-test (uniqueness, pattern write, leak check) and measures
    alloc/free cycle cost.

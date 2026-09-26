@@ -8,9 +8,17 @@
  *
  * This stub only establishes a known-good execution state:
  *   - direction flag cleared (SysV requires DF=0 at function entry)
- *   - kernel-owned stack (we do not trust the loader stack size forever)
  *   - 16-byte stack alignment at the call into C (SysV AMD64)
  *   - frame pointer zeroed so unwinding terminates cleanly
+ *
+ * The stack is the one the boot protocol hands over: a dedicated
+ * 64 KiB loader-allocated stack (bi->stack_base/stack_size, type
+ * SYPAS_MEM_LOADER, RSP at its top).  Keeping it is the contract —
+ * allocating a second 64 KiB stack in .bss would waste memory and
+ * make stack_base/stack_size dead protocol surface.  The kernel
+ * switches to a kernel-owned stack when it builds its own page
+ * tables (Phase 4).
+ *
  * kmain() never returns; if it does, halt forever.
  */
 
@@ -20,7 +28,6 @@
 _kstart:
     cli
     cld
-    movabs  $kboot_stack_top, %rsp
     andq    $-16, %rsp
     xorl    %ebp, %ebp
     call    kmain                    /* rdi = bootinfo, untouched */
@@ -28,14 +35,5 @@ _kstart:
     hlt
     jmp     1b
     .size _kstart, . - _kstart
-
-    /* 64 KiB boot stack in .bss, 16-byte aligned */
-    .section .bss
-    .align 16
-    .globl kboot_stack
-kboot_stack:
-    .skip 65536
-    .globl kboot_stack_top
-kboot_stack_top:
 
     .section .note.GNU-stack, "", @progbits

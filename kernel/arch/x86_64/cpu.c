@@ -22,10 +22,27 @@ void cpu_identify(cpu_info_t *info)
     ((u32 *)info->vendor)[2] = c;
     info->vendor[12] = 0;
 
+    /* Family/model per the Intel SDM (CPUID leaf 1, EAX):
+     *   family = base_family;            + extended_family only when
+     *                                      base_family == 0xF
+     *   model  = base_model;             extended_model contributes
+     *                                      high bits only when
+     *                                      base_family is 0x6 or 0xF
+     * (AMD documents the same composition rules.)  The extended fields
+     * are NOT unconditionally additive. */
     cpuid(1, 0, &a, &b, &c, &d);
+    u32 base_family = (a >> 8) & 0xF;
+    u32 base_model  = (a >> 4) & 0xF;
+    u32 ext_family  = (a >> 20) & 0xFF;
+    u32 ext_model   = (a >> 16) & 0xF;
+
     info->stepping = a & 0xF;
-    info->model    = ((a >> 4) & 0xF) | ((a >> 12) & 0xF0);
-    info->family   = ((a >> 8) & 0xF) + ((a >> 20) & 0xFF);
+    info->family   = base_family;
+    info->model    = base_model;
+    if (base_family == 0xF)
+        info->family += ext_family;
+    if (base_family == 0x6 || base_family == 0xF)
+        info->model |= ext_model << 4;
     info->has_tsc  = d & (1u << 4);
     info->has_apic = d & (1u << 9);
     info->has_sse2 = d & (1u << 26);

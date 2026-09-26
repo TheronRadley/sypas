@@ -16,8 +16,10 @@ Usage:
   mkfat.py OUTPUT SIZE_MIB SRC=/DST/PATH [SRC=/DST/PATH ...]
 """
 
+import os
 import struct
 import sys
+import time
 
 SEC = 512
 SPC = 1                 # sectors per cluster
@@ -26,9 +28,16 @@ NFATS = 2
 ROOT_ENTRIES = 512
 ROOT_SECS = ROOT_ENTRIES * 32 // SEC
 
-# Deterministic stamps: 2025-09-25 12:00:00
-DOS_DATE = ((2025 - 1980) << 9) | (9 << 5) | 25
-DOS_TIME = (12 << 11)
+# Deterministic stamps via the reproducible-builds convention:
+# honor SOURCE_DATE_EPOCH when set; otherwise fall back to a fixed,
+# documented epoch (2025-09-25 12:00:00 UTC) so plain `make iso` is
+# byte-reproducible without any environment setup.
+# Same source + same toolchain + same SOURCE_DATE_EPOCH = same image.
+_FALLBACK_EPOCH = 1758801600
+_EPOCH = int(os.environ.get("SOURCE_DATE_EPOCH", _FALLBACK_EPOCH))
+_TM = time.gmtime(_EPOCH)
+DOS_DATE = ((max(_TM.tm_year, 1980) - 1980) << 9) | (_TM.tm_mon << 5) | _TM.tm_mday
+DOS_TIME = (_TM.tm_hour << 11) | (_TM.tm_min << 5) | (_TM.tm_sec // 2)
 VOLUME_ID = 0x53595041  # "SYPA"
 
 ATTR_DIR = 0x10

@@ -15,31 +15,10 @@
  */
 
 #include "efi.h"
+#include "elf.h"
 #include "../protocols/sypas_bootproto.h"
 
 #define KERNEL_PATH L"\\SYPAS\\KERNEL.ELF"
-
-/* ---- ELF64 ------------------------------------------------------------- */
-
-#define ELF_MAGIC   0x464C457FU /* "\x7fELF" */
-#define ET_EXEC     2
-#define EM_X86_64   62
-#define PT_LOAD     1
-
-typedef struct {
-    uint32_t e_magic;
-    uint8_t  e_class, e_data, e_iversion, e_osabi, e_abiversion, e_pad[7];
-    uint16_t e_type, e_machine;
-    uint32_t e_version;
-    uint64_t e_entry, e_phoff, e_shoff;
-    uint32_t e_flags;
-    uint16_t e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum, e_shstrndx;
-} Elf64_Ehdr;
-
-typedef struct {
-    uint32_t p_type, p_flags;
-    uint64_t p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align;
-} Elf64_Phdr;
 
 /* ---- Globals ------------------------------------------------------------ */
 
@@ -99,6 +78,20 @@ static void die(CHAR16 *msg, EFI_STATUS st)
     for (;;) BS->Stall(1000000);
 }
 
+/* die() with an ASCII detail string (elf_status_str lives in shared,
+ * UEFI-free code and cannot produce CHAR16). */
+static void die_ascii(CHAR16 *msg, const char *detail, EFI_STATUS st)
+{
+    CHAR16 buf[64];
+    int i = 0;
+    while (detail[i] && i < 63) { buf[i] = (CHAR16)detail[i]; i++; }
+    buf[i] = 0;
+    print(L"\r\nSYPAS loader error: ");
+    print(msg);
+    print(L": ");
+    die(buf, st);
+}
+
 /* ---- Kernel file loading -------------------------------------------------- */
 
 static void *read_kernel_file(EFI_HANDLE img, UINTN *out_size)
@@ -142,48 +135,39 @@ static void *read_kernel_file(EFI_HANDLE img, UINTN *out_size)
 }
 
 /* Load PT_LOAD segments to their linked physical addresses.
- * Returns entry point; fills base/size of the loaded span. */
+ * Returns entry point; fills base/size of the loaded span.
+ *
+ * All parsing/validation lives in elf_plan_load() (elf.c, unit-tested
+ * on the host against malformed images); this function only executes
+ * an already-proven plan: allocate, zero, copy. */
 static uint64_t load_kernel_elf(const uint8_t *file, UINTN fsize,
                                 uint64_t *phys_base, uint64_t *phys_size)
 {
-    const Elf64_Ehdr *eh = (const Elf64_Ehdr *)file;
+    elf_load_plan_t plan;
+    elf_status_t es = elf_plan_load(file, fsize, &plan);
+    if (es != ELF_OK)
+        die_ascii(L"kernel image rejected", elf_status_str(es),
+                  EFI_LOAD_ERROR);
 
-    if (fsize < sizeof(*eh) || eh->e_magic != ELF_MAGIC)
-        die(L"kernel is not an ELF image", EFI_LOAD_ERROR);
-    if (eh->e_class != 2 || eh->e_machine != EM_X86_64 || eh->e_type != ET_EXEC)
-        die(L"kernel is not an x86_64 executable", EFI_LOAD_ERROR);
+    for (int i = 0; i < plan.nsegs; i++) {
+        const elf_segment_t *seg = &plan.segs[i];
 
-    uint64_t lo = ~0ULL, hi = 0;
-    const Elf64_Phdr *ph = (const Elf64_Phdr *)(file + eh->e_phoff);
-
-    for (int i = 0; i < eh->e_phnum; i++) {
-        if (ph[i].p_type != PT_LOAD || ph[i].p_memsz == 0)
-            continue;
-
-        uint64_t seg_start = ph[i].p_paddr & ~0xFFFULL;
-        uint64_t seg_end   = (ph[i].p_paddr + ph[i].p_memsz + 0xFFF) & ~0xFFFULL;
-
-        EFI_PHYSICAL_ADDRESS addr = seg_start;
+        EFI_PHYSICAL_ADDRESS addr = seg->page_base;
         EFI_STATUS st = BS->AllocatePages(AllocateAddress, EfiLoaderData,
-                                          (seg_end - seg_start) / EFI_PAGE_SIZE,
+                                          (seg->page_end - seg->page_base)
+                                              / EFI_PAGE_SIZE,
                                           &addr);
         if (EFI_ERROR(st))
             die(L"kernel load address is occupied "
                 L"(SYPAS v1 requires its fixed physical base to be free)", st);
 
-        lmemset((void *)seg_start, 0, seg_end - seg_start);
-        lmemcpy((void *)ph[i].p_paddr, file + ph[i].p_offset, ph[i].p_filesz);
-
-        if (seg_start < lo) lo = seg_start;
-        if (seg_end   > hi) hi = seg_end;
+        lmemset((void *)seg->page_base, 0, seg->page_end - seg->page_base);
+        lmemcpy((void *)seg->paddr, file + seg->offset, seg->filesz);
     }
 
-    if (hi == 0)
-        die(L"kernel has no loadable segments", EFI_LOAD_ERROR);
-
-    *phys_base = lo;
-    *phys_size = hi - lo;
-    return eh->e_entry;
+    *phys_base = plan.phys_base;
+    *phys_size = plan.phys_end - plan.phys_base;
+    return plan.entry;
 }
 
 /* ---- Framebuffer / ACPI --------------------------------------------------- */
@@ -234,8 +218,11 @@ static uint32_t efi_to_sypas_memtype(uint32_t t)
         return SYPAS_MEM_USABLE;
     case EfiLoaderCode:
     case EfiLoaderData:
-        /* All loader allocations, incl. the kernel image itself; the kernel
-         * re-tags its own image using kernel_phys_base/kernel_size. */
+        /* Loader allocations: bootinfo, stack, map buffers, loader image.
+         * The kernel image is also EfiLoaderData at this point; the
+         * translation loop below splits those ranges out and re-tags
+         * them SYPAS_MEM_KERNEL so the handoff map states real
+         * ownership. */
         return SYPAS_MEM_LOADER;
     case EfiBootServicesCode:
     case EfiBootServicesData:
@@ -252,9 +239,40 @@ static uint32_t efi_to_sypas_memtype(uint32_t t)
     case EfiMemoryMappedIO:
     case EfiMemoryMappedIOPortSpace:
         return SYPAS_MEM_MMIO;
+    case EfiUnacceptedMemoryType:
+        /* UEFI 2.9+/2.10 unaccepted memory (TDX/SEV-SNP): not usable
+         * until accepted, which v1 does not do. */
+        return SYPAS_MEM_RESERVED;
     default:
         return SYPAS_MEM_RESERVED;
     }
+}
+
+/* Append [base, base+len) with `type`, coalescing with the previous
+ * entry when contiguous and same-typed.  `cap` is the entry capacity of
+ * the output buffer; on overflow the count is returned unchanged and
+ * *overflow is set.  The caller halts on overflow: a truncated memory
+ * map silently misclassifies RAM, which is worse than a visible hang. */
+static uint64_t smap_append(sypas_memmap_entry_t *smap, uint64_t count,
+                            uint64_t cap, int *overflow,
+                            uint64_t base, uint64_t len, uint32_t type)
+{
+    if (len == 0)
+        return count;
+    if (count && smap[count - 1].type == type &&
+        smap[count - 1].base + smap[count - 1].length == base) {
+        smap[count - 1].length += len;
+        return count;
+    }
+    if (count == cap) {
+        *overflow = 1;
+        return count;
+    }
+    smap[count].base = base;
+    smap[count].length = len;
+    smap[count].type = type;
+    smap[count].reserved = 0;
+    return count + 1;
 }
 
 /* ---- Entry ------------------------------------------------------------------ */
@@ -291,7 +309,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE img, EFI_SYSTEM_TABLE *systab)
     sypas_bootinfo_t *bi = (sypas_bootinfo_t *)bi_page;
     lmemset(bi, 0, sizeof(*bi));
     bi->magic            = SYPAS_BOOT_MAGIC;
-    bi->version          = SYPAS_BOOT_VERSION;
+    bi->version_major    = SYPAS_BOOT_VERSION_MAJOR;
+    bi->version_minor    = SYPAS_BOOT_VERSION_MINOR;
     bi->size             = sizeof(*bi);
     bi->kernel_phys_base = kbase;
     bi->kernel_size      = ksize;
@@ -302,20 +321,50 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE img, EFI_SYSTEM_TABLE *systab)
     fill_framebuffer(bi);
 
     /* 3. Memory map buffers.
-     * Allocate ONCE with generous slack, then never allocate again: any
-     * allocation after GetMemoryMap invalidates the map key. */
+     * UEFI says the map may grow between the size query and the final
+     * call (our own allocations below, firmware activity), and that
+     * DescriptorSize may exceed sizeof(EFI_MEMORY_DESCRIPTOR).  Size the
+     * buffer in a loop — allocate, query, and if the firmware still
+     * reports EFI_BUFFER_TOO_SMALL, free and grow.  All allocation
+     * happens here, strictly before the ExitBootServices sequence,
+     * because after a failed ExitBootServices only GetMemoryMap and
+     * ExitBootServices may be called. */
     UINTN mmsize = 0, mapkey = 0, dsz = 0;
     UINT32 dver = 0;
-    BS->GetMemoryMap(&mmsize, 0, &mapkey, &dsz, &dver);   /* query size */
-    mmsize += 16 * dsz;
-    UINTN mm_pages = EFI_SIZE_TO_PAGES(mmsize);
-    /* Same buffer also receives the translated SYPAS entries afterwards;
-     * reserve room for both regions. */
-    UINTN sypas_pages =
-        EFI_SIZE_TO_PAGES((mmsize / dsz + 16) * sizeof(sypas_memmap_entry_t));
-    st = BS->AllocatePages(AllocateAnyPages, EfiLoaderData,
-                           mm_pages + sypas_pages, &mm_buf);
-    if (EFI_ERROR(st)) die(L"memory map alloc failed", st);
+    st = BS->GetMemoryMap(&mmsize, 0, &mapkey, &dsz, &dver); /* size query */
+    if (st != EFI_BUFFER_TOO_SMALL || dsz == 0)
+        die(L"GetMemoryMap size query failed", st);
+
+    UINTN mm_pages = 0, sypas_cap = 0, sypas_pages = 0;
+    for (int grow = 0; ; grow++) {
+        if (grow == 4)
+            die(L"memory map keeps growing", EFI_BUFFER_TOO_SMALL);
+
+        /* Slack: our own map/handoff allocations + firmware churn. */
+        mmsize   += 32 * dsz;
+        mm_pages  = EFI_SIZE_TO_PAGES(mmsize);
+        /* Same allocation also receives the translated SYPAS entries.
+         * Splitting the kernel range out of loader ranges can add up to
+         * two entries per descriptor in the worst case: reserve 2x. */
+        sypas_cap   = 2 * (mmsize / dsz) + 16;
+        sypas_pages = EFI_SIZE_TO_PAGES(sypas_cap * sizeof(sypas_memmap_entry_t));
+
+        st = BS->AllocatePages(AllocateAnyPages, EfiLoaderData,
+                               mm_pages + sypas_pages, &mm_buf);
+        if (EFI_ERROR(st)) die(L"memory map alloc failed", st);
+
+        UINTN sz = mm_pages * EFI_PAGE_SIZE;
+        st = BS->GetMemoryMap(&sz, (EFI_MEMORY_DESCRIPTOR *)mm_buf,
+                              &mapkey, &dsz, &dver);
+        if (!EFI_ERROR(st)) {
+            mmsize = sz;
+            break;
+        }
+        if (st != EFI_BUFFER_TOO_SMALL)
+            die(L"GetMemoryMap failed", st);
+        BS->FreePages(mm_buf, mm_pages + sypas_pages);
+        mmsize = sz;
+    }
 
     EFI_MEMORY_DESCRIPTOR *efimap = (EFI_MEMORY_DESCRIPTOR *)mm_buf;
     sypas_memmap_entry_t *smap =
@@ -323,8 +372,10 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE img, EFI_SYSTEM_TABLE *systab)
 
     print(L"entering SYPAS kernel...\r\n\r\n");
 
-    /* 4. Final map + ExitBootServices (retry once: printing or firmware
-     * activity may have changed the map key). */
+    /* 4. Final map + ExitBootServices.  The printing above may have
+     * changed the map key, and the spec requires the key from the
+     * latest GetMemoryMap; after a failed ExitBootServices only these
+     * two calls are permitted, so the retry loop does nothing else. */
     for (int attempt = 0; ; attempt++) {
         UINTN sz = mm_pages * EFI_PAGE_SIZE;
         st = BS->GetMemoryMap(&sz, efimap, &mapkey, &dsz, &dver);
@@ -340,25 +391,38 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE img, EFI_SYSTEM_TABLE *systab)
 
     /* --- Boot services are gone. No more firmware calls, no printing. --- */
 
-    /* 5. Translate the memory map (coalescing adjacent same-type ranges). */
+    /* 5. Translate the memory map, splitting out the kernel image.
+     * The kernel was loaded as EfiLoaderData; carve its span out of the
+     * loader ranges and tag it SYPAS_MEM_KERNEL so the handoff map is a
+     * real ownership map, not documentation. */
+    uint64_t kend = kbase + ksize;
     uint64_t count = 0;
+    int overflow = 0;
     for (UINTN off = 0; off < mmsize; off += dsz) {
         EFI_MEMORY_DESCRIPTOR *d = (EFI_MEMORY_DESCRIPTOR *)((uint8_t *)efimap + off);
         uint64_t base = d->PhysicalStart;
         uint64_t len  = d->NumberOfPages * EFI_PAGE_SIZE;
+        uint64_t end  = base + len;
         uint32_t type = efi_to_sypas_memtype(d->Type);
-        if (len == 0)
-            continue;
-        if (count && smap[count-1].type == type &&
-            smap[count-1].base + smap[count-1].length == base) {
-            smap[count-1].length += len;
+
+        if (type == SYPAS_MEM_LOADER && base < kend && kbase < end) {
+            uint64_t ov_lo = base > kbase ? base : kbase;
+            uint64_t ov_hi = end  < kend  ? end  : kend;
+            count = smap_append(smap, count, sypas_cap, &overflow,
+                                base, ov_lo - base, SYPAS_MEM_LOADER);
+            count = smap_append(smap, count, sypas_cap, &overflow,
+                                ov_lo, ov_hi - ov_lo, SYPAS_MEM_KERNEL);
+            count = smap_append(smap, count, sypas_cap, &overflow,
+                                ov_hi, end - ov_hi, SYPAS_MEM_LOADER);
         } else {
-            smap[count].base = base;
-            smap[count].length = len;
-            smap[count].type = type;
-            smap[count].reserved = 0;
-            count++;
+            count = smap_append(smap, count, sypas_cap, &overflow,
+                                base, len, type);
         }
+    }
+    if (overflow) {
+        /* Cannot print or return post-ExitBootServices; a truncated map
+         * must never reach the kernel.  Halt where a debugger sees it. */
+        for (;;) __asm__ volatile("cli; hlt");
     }
     bi->memmap = (uint64_t)smap;
     bi->memmap_count = count;

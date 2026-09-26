@@ -82,8 +82,12 @@ void kvprintf(const char *fmt, va_list ap)
             break;
         case 'd': case 'i': {
             i64 v = longs ? va_arg(ap, i64) : va_arg(ap, i32);
-            if (v < 0) { emit('-'); v = -v; }
-            emit_uint((u64)v, 10, false, width, zero);
+            u64 m = (u64)v;
+            if (v < 0) {
+                emit('-');
+                m = 0 - m;   /* unsigned negate: INT64_MIN-safe */
+            }
+            emit_uint(m, 10, false, width, zero);
             break;
         }
         case 'u': {

@@ -15,13 +15,18 @@ Usage: mkiso.py OUTPUT ESP_IMAGE BIOS_STUB [SRC=/ISO/PATH ...]
 """
 
 import io
+import os
 import sys
 import time
 
-# Deterministic output: pycdlib stamps volume/directory dates with "now".
-# Freeze the clock (2025-09-25 12:00:00 UTC) so rebuilding identical inputs
-# yields a byte-identical ISO.
-_FIXED_TIME = 1758801600.0
+# Deterministic output: pycdlib stamps volume/directory dates with "now",
+# so freeze the clock.  Reproducible-builds convention: honor
+# SOURCE_DATE_EPOCH when set; otherwise fall back to a fixed, documented
+# epoch (2025-09-25 12:00:00 UTC) so plain `make iso` stays
+# byte-reproducible without any environment setup.
+# Same source + same toolchain + same SOURCE_DATE_EPOCH = same image.
+_FALLBACK_EPOCH = 1758801600.0
+_FIXED_TIME = float(os.environ.get("SOURCE_DATE_EPOCH", _FALLBACK_EPOCH))
 time.time = lambda: _FIXED_TIME
 
 import pycdlib

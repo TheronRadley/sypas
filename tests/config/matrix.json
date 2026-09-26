@@ -1,0 +1,43 @@
+{
+  "_comment": [
+    "Single source of truth for the QEMU/OVMF machine matrix.",
+    "Consumed by tests/boot/boot_test.py, benchmarks/boot/run.py and",
+    "scripts/run-qemu.sh; docs/hardware-target.md, docs/testing.md and",
+    "docs/toolchain.md refer here instead of repeating the numbers.",
+    "Change values HERE, nowhere else."
+  ],
+  "machine": "q35",
+  "cpu": "max",
+  "configs": [
+    {
+      "name": "single",
+      "smp": 1,
+      "mem_mib": 1024,
+      "boot_test": true,
+      "benchmark": false
+    },
+    {
+      "name": "lowend",
+      "smp": 2,
+      "mem_mib": 2048,
+      "boot_test": true,
+      "benchmark": true
+    },
+    {
+      "name": "normal",
+      "smp": 4,
+      "mem_mib": 3072,
+      "boot_test": true,
+      "benchmark": true,
+      "note": "Hardware target is 4 CPU / 4096 MiB (docs/hardware-target.md); mem is capped at 3072 MiB because the reference dev sandbox host has 3.9 GiB RAM and cannot back a 4 GiB guest. Raise mem_mib on larger hosts."
+    },
+    {
+      "name": "upper",
+      "smp": 8,
+      "mem_mib": 8192,
+      "boot_test": false,
+      "benchmark": false,
+      "note": "run-qemu.sh profile for manual use on big hosts; not part of the automated sandbox matrix."
+    }
+  ]
+}

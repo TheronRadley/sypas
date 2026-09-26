@@ -42,6 +42,8 @@ void irq_install(u8 irq, void (*handler)(interrupt_frame_t *));
 void pic_init(void);
 void pic_unmask(u8 irq);
 void pic_send_eoi(u8 irq);
+bool pic_handle_spurious(u8 irq);   /* true = spurious, fully handled  */
+u64  pic_spurious_count(void);
 
 /* ---- Timer ----------------------------------------------------------------- */
 #define PIT_HZ 100

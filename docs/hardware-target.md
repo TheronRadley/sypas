@@ -17,7 +17,10 @@ BIOS path planned for v1). Virtualization target: **QEMU q35 + OVMF**.
 
 Hardware/VM configurations are listed as verified **only after an actual
 test run** (automated via `make test-boot`, results in
-docs/performance.md).
+docs/performance.md). The QEMU machine matrix itself is defined in
+`tests/config/matrix.json` — the single source of truth consumed by the
+test, benchmark, and run tooling; this table records outcomes, not
+configuration.
 
 | Configuration | Firmware | Status |
 |---|---|---|

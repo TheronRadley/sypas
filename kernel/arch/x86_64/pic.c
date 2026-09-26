@@ -21,6 +21,9 @@
 #define ICW1_INIT 0x11   /* init + ICW4 needed */
 #define ICW4_8086 0x01
 #define PIC_EOI   0x20
+#define OCW3_ISR  0x0B   /* next read returns the In-Service Register */
+
+static u64 spurious_irqs;   /* counted for diagnostics */
 
 void pic_init(void)
 {
@@ -53,4 +56,47 @@ void pic_send_eoi(u8 irq)
     if (irq >= 8)
         outb(PIC2_CMD, PIC_EOI);
     outb(PIC1_CMD, PIC_EOI);
+}
+
+static u8 pic_read_isr(u16 cmd_port)
+{
+    outb(cmd_port, OCW3_ISR);
+    return inb(cmd_port);
+}
+
+/*
+ * Spurious IRQ detection (8259A datasheet behavior): a masked or
+ * de-asserted line can still deliver the lowest-priority vector — IRQ7
+ * on the master, IRQ15 on the slave — with NO in-service bit set.
+ *
+ * Handling differs from a real interrupt and from each other:
+ *   spurious IRQ7  -> no EOI at all (nothing is in service)
+ *   spurious IRQ15 -> EOI the MASTER only (the cascade line IRQ2 was
+ *                     genuinely raised on the master; the slave has
+ *                     nothing in service)
+ *
+ * Returns true if the IRQ was spurious and fully handled here; the
+ * dispatcher must then neither run a handler nor send a normal EOI.
+ */
+bool pic_handle_spurious(u8 irq)
+{
+    if (irq == 7) {
+        if (pic_read_isr(PIC1_CMD) & 0x80)
+            return false;                 /* real IRQ7 */
+        spurious_irqs++;
+        return true;                      /* no EOI */
+    }
+    if (irq == 15) {
+        if (pic_read_isr(PIC2_CMD) & 0x80)
+            return false;                 /* real IRQ15 */
+        spurious_irqs++;
+        outb(PIC1_CMD, PIC_EOI);          /* master saw IRQ2 for real */
+        return true;
+    }
+    return false;
+}
+
+u64 pic_spurious_count(void)
+{
+    return spurious_irqs;
 }

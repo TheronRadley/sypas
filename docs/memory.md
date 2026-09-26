@@ -4,7 +4,9 @@
 
 ```
 UEFI GetMemoryMap
-  → loader translates EFI types → SYPAS types (coalescing neighbors)
+  → loader translates EFI types → SYPAS types
+      (splits the kernel image span out of loader ranges and tags it
+       SYPAS_MEM_KERNEL, then coalesces same-type neighbors)
   → sypas_bootinfo.memmap (physical array, boot protocol v1)
   → kernel pmm_init()
 ```
@@ -16,8 +18,11 @@ SYPAS type semantics are defined in the boot protocol
   freed even though boot services ended, because the identity page
   tables the kernel still runs on live there. Reclaim happens in
   Phase 4 when the kernel owns page tables.
-- `SYPAS_MEM_LOADER` (bootinfo, translated map, kernel stack, loader
-  image) stays reserved until the kernel stops referencing those pages.
+- `SYPAS_MEM_LOADER` (bootinfo, translated map, boot stack, loader
+  image) stays reserved until the kernel stops referencing those pages
+  — the kernel is actively running on the boot stack in this range.
+- `SYPAS_MEM_KERNEL` marks the loaded kernel image itself (tagged by
+  the loader, not inferred by the kernel).
 - Page 0 and the low 1 MiB are never handed out.
 
 ## Physical page allocator (kernel/mm/pmm.c)

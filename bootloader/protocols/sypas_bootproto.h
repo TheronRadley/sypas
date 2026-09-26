@@ -8,10 +8,21 @@
  *
  * Rules:
  *  - Every field is fixed-width little-endian.
- *  - The structure may only ever grow.  `size` tells the kernel how much of
- *    the structure the bootloader actually filled in.
- *  - `version` is bumped on any semantic change.  The kernel must refuse a
- *    major version it does not understand.
+ *  - Versioning is major/minor:
+ *      - `version_major` changes on any incompatible layout or semantic
+ *        change.  The kernel MUST refuse a major it does not understand.
+ *      - `version_minor` is bumped when fields are appended.  Within one
+ *        major the structure may only ever grow: existing fields never
+ *        move, change width, or change meaning.
+ *      - A kernel that knows major M / minor N must accept any minor >= N
+ *        (it understands the prefix it knows and ignores trailing bytes)
+ *        and must reject `size` smaller than the prefix it requires.
+ *      - Fields appended after the kernel's known minor are probed with
+ *        SYPAS_BI_HAS() before use, never assumed.
+ *  - `size` tells the kernel how many bytes of the structure the
+ *    bootloader actually filled in.
+ *  - The layout is mechanically asserted below (_Static_assert); any edit
+ *    that moves an existing field fails the build on both sides.
  *  - All pointers are physical addresses, valid under the identity mapping
  *    that is active when the kernel is entered (see execution environment
  *    below).
@@ -34,10 +45,18 @@
 #define SYPAS_BOOTPROTO_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 /* "SYPASBP1" as a little-endian 64-bit integer */
-#define SYPAS_BOOT_MAGIC   0x3150425341505953ULL
-#define SYPAS_BOOT_VERSION 1
+#define SYPAS_BOOT_MAGIC         0x3150425341505953ULL
+#define SYPAS_BOOT_VERSION_MAJOR 1
+#define SYPAS_BOOT_VERSION_MINOR 0
+
+/* True if the loader filled in `field` (probe before using any field
+ * newer than the minor version this consumer was built against). */
+#define SYPAS_BI_HAS(bi, field) \
+    ((uint64_t)(bi)->size >= \
+     offsetof(sypas_bootinfo_t, field) + sizeof((bi)->field))
 
 /* ---- Memory map ------------------------------------------------------- */
 
@@ -79,7 +98,8 @@ enum sypas_fb_format {
 
 typedef struct sypas_bootinfo {
     uint64_t magic;             /* SYPAS_BOOT_MAGIC                        */
-    uint32_t version;           /* SYPAS_BOOT_VERSION                      */
+    uint16_t version_major;     /* SYPAS_BOOT_VERSION_MAJOR                */
+    uint16_t version_minor;     /* SYPAS_BOOT_VERSION_MINOR                */
     uint32_t size;              /* bytes of this struct that are valid     */
 
     /* Memory */
@@ -108,5 +128,34 @@ typedef struct sypas_bootinfo {
     /* Boot command line (NUL terminated, may be empty) */
     char     cmdline[256];
 } sypas_bootinfo_t;
+
+/* Size of the complete v1.0 structure.  A v1 kernel requires at least
+ * this many valid bytes; later minors only ever append fields. */
+#define SYPAS_BOOTINFO_V1_0_SIZE sizeof(sypas_bootinfo_t)
+
+/* ---- Mechanically enforced layout (both sides compile this) ----------- */
+
+_Static_assert(sizeof(sypas_memmap_entry_t) == 24,
+               "memmap entry layout changed");
+_Static_assert(offsetof(sypas_memmap_entry_t, type) == 16,
+               "memmap entry layout changed");
+
+_Static_assert(offsetof(sypas_bootinfo_t, magic)            ==   0, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, version_major)    ==   8, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, version_minor)    ==  10, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, size)             ==  12, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, memmap)           ==  16, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, memmap_count)     ==  24, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, fb_base)          ==  32, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, fb_width)         ==  40, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, fb_format)        ==  52, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, acpi_rsdp)        ==  56, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, efi_system_table) ==  64, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, kernel_phys_base) ==  72, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, kernel_size)      ==  80, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, stack_base)       ==  88, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, stack_size)       ==  96, "layout");
+_Static_assert(offsetof(sypas_bootinfo_t, cmdline)          == 104, "layout");
+_Static_assert(sizeof(sypas_bootinfo_t)                     == 360, "layout");
 
 #endif /* SYPAS_BOOTPROTO_H */

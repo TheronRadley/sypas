@@ -1,5 +1,6 @@
 /*
- * SYPAS kernel — framebuffer text console (Phase 23 seed).
+ * SYPAS kernel — framebuffer text console (Phase 2 bring-up console;
+ * disposable once a real graphics stack exists).
  *
  * Direct linear-framebuffer text rendering on the GOP-provided mode.
  * Glyphs are the vendored public-domain 8x8 bitmap font scaled 2x

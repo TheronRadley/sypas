@@ -4,7 +4,7 @@
  * Phase 3 allocator: one bit per 4 KiB page over the highest usable
  * physical address, with a next-fit cursor.  Simple, measurable, and easy
  * to verify; a zoned/buddy design replaces it only when benchmarks show
- * the need (docs/technology-decisions.md, DR-7).
+ * the need (docs/technology-decisions.md, DR-5).
  *
  * The bitmap itself is carved from the first usable region large enough
  * to hold it, and those pages are marked allocated before general use.

@@ -108,8 +108,13 @@ void isr_dispatch(interrupt_frame_t *f)
     } else if (f->vector < 48) {
         u8 irq = (u8)(f->vector - 32);
 
-        /* Spurious IRQ7/IRQ15: no EOI for IRQ7; master-only EOI for 15.
-         * pic.c handles the details; a NULL handler is simply dropped. */
+        /* Spurious IRQ7/IRQ15 first: pic_handle_spurious() checks the
+         * in-service register and performs the asymmetric EOI rules
+         * itself (none for 7, master-only for 15).  A spurious vector
+         * must not reach a handler or get a normal EOI. */
+        if (pic_handle_spurious(irq))
+            return;
+
         if (irq_handlers[irq])
             irq_handlers[irq](f);
         pic_send_eoi(irq);

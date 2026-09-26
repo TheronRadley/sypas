@@ -30,15 +30,21 @@ How to replace later.
 
 ## DR-2: Boot protocol is a versioned single struct, physical pointers
 
-- **Decision:** one packed, versioned, grow-only structure
-  (`sypas_bootinfo_t`) with physical addresses valid under the firmware
-  identity map.
+- **Decision:** one packed, versioned structure (`sypas_bootinfo_t`)
+  with physical addresses valid under the firmware identity map.
+  Compatibility is major/minor: refuse an unknown major; within a
+  known major the structure only grows, newer minors are accepted, and
+  fields beyond the consumer's minor are probed via `SYPAS_BI_HAS()`
+  against `size` (see docs/boot-protocol.md — the rule matches what
+  the kernel actually enforces).
 - **Why:** explicit, testable contract; no undocumented assumptions.
+  The layout is `_Static_assert`ed field-by-field in the shared header
+  and exercised by host unit tests, not just documented.
 - **Complexity:** low. **Costs:** one 4 KiB page + map buffers.
 - **Alternatives:** Multiboot2 (foreign semantics, legacy baggage),
   Limine protocol (third-party ownership). Rejected: SYPAS owns its ABI.
-- **Replace later:** version bumps; `size` field allows additive growth
-  without breaking older kernels.
+- **Replace later:** minor bumps for additive growth; major bump for
+  anything incompatible.
 
 ## DR-3: v1 kernel runs on firmware identity mapping, linked at 4 MiB
 
@@ -75,8 +81,8 @@ How to replace later.
 
 - **Decision:** 1 bit per 4 KiB page, next-fit scan, byte-skip fast path.
 - **Why:** correct, small (64 KiB of bitmap per 2 GiB RAM), trivially
-  testable; performance measured (~112 cycles/alloc, ~46 cycles/free —
-  see docs/performance.md) is far from being a bottleneck at this phase.
+  testable; measured alloc/free cost (docs/performance.md is the single
+  source for the numbers) is far from being a bottleneck at this phase.
 - **Disadvantages:** O(n) worst case when nearly full; no locality/zone
   awareness; no contiguous multi-page allocation API yet.
 - **Alternatives:** buddy allocator (more code, unneeded until we have
@@ -100,8 +106,11 @@ How to replace later.
 - **Decision:** SYPAS builds its own FAT16 ESP writer; ISO mastering uses
   pycdlib.
 - **Why:** dev sandbox lacks mtools/xorriso; more importantly,
-  deterministic media (fixed timestamps/ids) makes boot images
-  byte-reproducible, which the release process will depend on.
+  deterministic media makes boot images byte-reproducible, which the
+  release process will depend on. Timestamps follow the
+  reproducible-builds `SOURCE_DATE_EPOCH` convention with a fixed,
+  documented fallback (see release/README.md) — not hidden hard-coded
+  dates.
 - **Disadvantages:** our FAT writer supports 8.3 names only (boot files
   are named to fit, deliberately).
 - **Verification:** independent Python FAT parser + OVMF itself reads the
@@ -111,8 +120,9 @@ How to replace later.
 ## DR-8: QEMU 9.2.4 + OVMF (edk2-stable202411) as the test platform
 
 - **Decision:** all "it works" claims at this phase mean q35 + OVMF,
-  TCG, 1/2/4-CPU 1/2/4-GiB matrix. Physical hardware: **NOT TESTED**,
-  stated everywhere.
+  TCG, across the machine matrix defined in `tests/config/matrix.json`
+  (the single source of truth — tests, benchmarks, and run scripts all
+  consume it). Physical hardware: **NOT TESTED**, stated everywhere.
 - **Why:** honest, reproducible, automatable in the sandbox.
 - **Replace later:** hardware matrix per docs/hardware-target.md when
   physical machines are available.

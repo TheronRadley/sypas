@@ -13,11 +13,15 @@ Note: sandbox timings are TCG (no KVM); firmware (OVMF) time dominates.
 import argparse
 import json
 import os
+import re
 import statistics
 import subprocess
 import sys
 import tempfile
 import time
+
+MATRIX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "..", "..", "tests", "config", "matrix.json")
 
 RUN_MARK = "SYSTEM STATUS: RUNNING"
 
@@ -77,27 +81,44 @@ def main():
                     default=os.path.expanduser("~/firmware/OVMF_VARS.fd"))
     args = ap.parse_args()
 
+    with open(MATRIX_PATH) as f:
+        matrix = json.load(f)
+
     out = {"method": "wall clock QEMU start -> serial RUNNING marker",
-           "accel": "TCG (no KVM in sandbox)", "machine": "q35, -cpu max",
+           "accel": "TCG (no KVM in sandbox)",
+           "machine": f"{matrix['machine']}, -cpu {matrix['cpu']}",
+           "matrix": os.path.relpath(MATRIX_PATH),
            "configs": []}
-    # 4 GiB guests exceed the dev sandbox host RAM; 4-CPU runs at 3 GiB.
-    for smp, mem in [(2, 2048), (4, 3072)]:
-        walls, kinits = [], []
+    for cfg in (c for c in matrix["configs"] if c.get("benchmark")):
+        smp, mem = cfg["smp"], cfg["mem_mib"]
+        walls, kinit_ms, kinit_raw = [], [], []
         for _ in range(args.runs):
             w, k = one_boot(args, smp, mem)
             if w is None:
                 print(f"boot failed/timeout at smp={smp}", file=sys.stderr)
                 sys.exit(1)
             walls.append(w)
-            kinits.append(k)
-        out["configs"].append({
-            "smp": smp, "mem_mib": mem, "runs": args.runs,
+            kinit_raw.append(k)
+            m = re.match(r"(\d+)\s*ms", k or "")
+            if m:
+                kinit_ms.append(int(m.group(1)))
+        entry = {
+            "config": cfg["name"], "smp": smp, "mem_mib": mem,
+            "runs": args.runs,
             "wall_to_running_s": {
                 "median": round(statistics.median(walls), 2),
                 "min": round(min(walls), 2),
                 "max": round(max(walls), 2)},
-            "kernel_reported_init": kinits[-1],
-        })
+        }
+        if kinit_ms:
+            entry["kernel_init_ms"] = {
+                "median": statistics.median(kinit_ms),
+                "min": min(kinit_ms),
+                "max": max(kinit_ms)}
+        else:
+            # keep the raw line rather than silently dropping the data
+            entry["kernel_reported_init_raw"] = kinit_raw[-1]
+        out["configs"].append(entry)
     print(json.dumps(out, indent=2))
 
 

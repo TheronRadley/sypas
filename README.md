@@ -34,7 +34,11 @@ All of the claims below are tested. See `docs/performance.md` for test condition
 
 * **Reproducible boot media:** deterministic FAT16 ESP + dual-entry El Torito ISO built with SYPAS's own tooling (`tools/mkfat.py`, `tools/mkiso.py`). Legacy BIOS selects a diagnostic stub. UEFI selects the real ESP.
 
-* **Automated boot test matrix:** tests 1, 2, and 4 CPUs with 1, 2, and 4 GiB of RAM and produces machine-readable results with `make test-boot`.
+* **Automated boot test matrix:** boots every configuration in `tests/config/matrix.json` (the single source of truth for the machine matrix) and produces machine-readable results with `make test-boot`; `make test-kernel-fault` proves the panic path with a fault-injected build.
+
+* **Host-side unit tests:** the loader's ELF validator and the boot protocol layout are unit-tested on the build host (`make test-unit`, ASan/UBSan) — the exact code that judges the kernel image at boot is exercised against malformed images without booting anything.
+
+* **CI:** every push builds with `-Werror`, runs the unit/media/boot/fault test tiers, and verifies that two clean builds produce byte-identical images (`.github/workflows/ci.yml`).
 
 ## What does NOT exist yet
 
@@ -44,23 +48,25 @@ The roadmap in `docs/architecture.md` defines the order these pieces are planned
 
 ## Building
 
-Requirements: gcc + binutils (x86_64 host), GNU make, Python 3.9+, and `pycdlib` for ISO assembly.
+Requirements: gcc + binutils (x86_64 host), GNU make, Python 3.11 (the documented environment; see `docs/toolchain.md`), and the pinned Python packages: `pip install -r tools/requirements-dev.txt`.
 
-`make test-media` additionally requires the [test-only] Unicorn Python package (`pip install unicorn`).
-
-`make run` and `make test-boot` require QEMU (`x86_64-softmmu`) and OVMF firmware. Paths can be overridden with `QEMU`, `OVMF_CODE`, and `OVMF_VARS`.
+`make run` and the QEMU test tiers require QEMU (`x86_64-softmmu`) and OVMF firmware. Paths can be overridden with `QEMU`, `OVMF_CODE`, and `OVMF_VARS`. Run `make doctor` to see exactly what your environment supports.
 
 See `docs/toolchain.md` for more details.
 
 ```text
-make            # build everything -> release/sypas-0.1.0.iso
-make run        # boot in QEMU (4 CPUs / 4 GiB)
-make run-lowend # boot with 2 CPUs / 2 GiB
+make            # build everything -> release/sypas-<version>.iso
+make doctor     # check the dev environment, explain what's missing
+make test       # run everything feasible on this machine
+make run        # boot in QEMU (normal profile from tests/config/matrix.json)
+make run-lowend # boot with the low-end profile
+make test-unit  # host unit tests: ELF validator + boot protocol layout
 make test-media # ISO/FAT/catalog checks + Unicorn BIOS-stub test
 make test-boot  # automated UEFI boot matrix, JSON output
+make test-kernel-fault # fault-injected build must panic truthfully
 ```
 
-A prebuilt bootable image is checked in at `release/sypas-0.1.0.iso`.
+Built ISOs land in `release/` (gitignored — Git holds source; release images are published as GitHub Release assets and are byte-reproducible from source, see `release/README.md`).
 
 Try it on a UEFI x86_64 VM:
 

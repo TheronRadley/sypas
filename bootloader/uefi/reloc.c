@@ -10,6 +10,12 @@
  * Called from start.S with the System V AMD64 convention:
  *   base    = actual image load address (ImageBase symbol)
  *   dynamic = address of the _DYNAMIC array
+ *
+ * Returns 0 on success.  Returns nonzero if the dynamic section is
+ * malformed or contains a relocation type this code cannot apply:
+ * running with unapplied relocations means executing corrupt pointers,
+ * so start.S turns a nonzero return into EFI_LOAD_ERROR back to the
+ * firmware instead of jumping into efi_main.
  */
 
 #include <stdint.h>
@@ -32,7 +38,7 @@ typedef struct {
     int64_t  r_addend;
 } Elf64_Rela;
 
-void sypas_reloc(uint64_t base, const Elf64_Dyn *dynamic)
+uint64_t sypas_reloc(uint64_t base, const Elf64_Dyn *dynamic)
 {
     uint64_t rela = 0, relasz = 0, relaent = sizeof(Elf64_Rela);
 
@@ -44,20 +50,23 @@ void sypas_reloc(uint64_t base, const Elf64_Dyn *dynamic)
         }
     }
 
-    if (!rela || !relaent)
-        return;
+    if (!rela || !relasz)
+        return 0;                      /* nothing to relocate */
+
+    /* .dynamic sanity: entry size must be what we compiled against and
+     * the table size must be a whole number of entries. */
+    if (relaent != sizeof(Elf64_Rela) || relasz % relaent != 0)
+        return 1;
 
     /* DT_RELA holds the link-time address; the image links at 0, so the
      * runtime location is base + rela. */
     const Elf64_Rela *r   = (const Elf64_Rela *)(base + rela);
     const Elf64_Rela *end = (const Elf64_Rela *)(base + rela + relasz);
 
-    for (; r < end; r = (const Elf64_Rela *)((const uint8_t *)r + relaent)) {
-        if ((uint32_t)r->r_info == R_X86_64_RELATIVE)
-            *(uint64_t *)(base + r->r_offset) = base + (uint64_t)r->r_addend;
-        /* Any other relocation type would indicate a build problem
-         * (-Bsymbolic + PIC should only emit RELATIVE).  We cannot print
-         * yet, so they are ignored; efi_main validates itself early by
-         * running from relocated pointers. */
+    for (; r < end; r++) {
+        if ((uint32_t)r->r_info != R_X86_64_RELATIVE)
+            return 1;   /* -Bsymbolic + PIC must only emit RELATIVE */
+        *(uint64_t *)(base + r->r_offset) = base + (uint64_t)r->r_addend;
     }
+    return 0;
 }

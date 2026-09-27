@@ -58,6 +58,9 @@ SECTIONS
     .hash    : { *(.hash) }
     .gnu.hash : { *(.gnu.hash) }
 
+    /* start.S passes this explicit image bound to the self-relocator. */
+    ImageEnd = .;
+
     /DISCARD/ : {
         *(.comment)
         *(.note.*)

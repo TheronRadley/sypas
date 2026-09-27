@@ -48,7 +48,7 @@ the other way around) — and inspects the serial transcript.
 | UART loopback | serial path real before we trust its output |
 | boot protocol magic/version/size | loader↔kernel contract intact |
 | PMM self-test (512 pages) | uniqueness, writability, no leak, alloc/free cost |
-| `int $0x80` ×2 counted | IDT dispatch actually works |
+| private `int $0xF0` ×2 counted | IDT dispatch works without reserving a syscall identity |
 | PIT 250 ms tick count | external interrupt delivery actually works |
 
 ## Negative-path tests (automated: `make test-kernel-fault`)
@@ -94,7 +94,7 @@ Manually verified earlier (2026-09-25): ISO built without a kernel →
 - `make test-boot`: **NOT TESTED in this sandbox turn**. Neither QEMU
   (`qemu-system-x86_64`) nor the configured OVMF files
   (`$HOME/firmware/OVMF_CODE.fd` and `OVMF_VARS.fd`) are available here.
-  The existing Phase 2 QEMU/OVMF PASS record above remains historical;
+  The existing BOOT-1 QEMU/OVMF PASS record above remains historical;
   this media change was validated structurally and with the no-QEMU
   Unicorn test, not represented as a new UEFI boot result.
 

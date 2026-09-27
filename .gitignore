@@ -4,4 +4,5 @@ build/
 *.so
 __pycache__/
 *.pyc
+.venv/
 release/*.iso

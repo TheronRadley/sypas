@@ -65,6 +65,7 @@ static void mk_image(img_t *im, int nphdr)
 
     for (int i = 0; i < nphdr; i++) {
         im->ph[i].p_type   = PT_LOAD;
+        im->ph[i].p_flags  = PF_R | PF_X;
         im->ph[i].p_offset = data_off + (uint64_t)i * 0x1000;
         im->ph[i].p_vaddr  = 0x400000 + (uint64_t)i * 0x1000;
         im->ph[i].p_paddr  = im->ph[i].p_vaddr;
@@ -136,7 +137,10 @@ int main(int argc, char **argv)
     mk_image(&im, 1); im.eh->e_type = 3;              /* ET_DYN */
     CHECK(run(&im) == ELF_ERR_TYPE, "ET_DYN rejected");
 
-    /* Program header table */
+    /* Header and program-header-table layout */
+    mk_image(&im, 1); im.eh->e_ehsize = sizeof(Elf64_Ehdr) - 1;
+    CHECK(run(&im) == ELF_ERR_EHSIZE, "bad e_ehsize rejected");
+
     mk_image(&im, 1); im.eh->e_phentsize = sizeof(Elf64_Phdr) + 8;
     CHECK(run(&im) == ELF_ERR_PHENTSIZE, "bad e_phentsize rejected");
 
@@ -164,7 +168,24 @@ int main(int argc, char **argv)
     mk_image(&im, 1); im.ph[0].p_filesz = im.ph[0].p_memsz + 1;
     CHECK(run(&im) == ELF_ERR_SEG_SIZES, "filesz > memsz rejected");
 
+    /* SYPAS image policy: identity addresses, valid ELF alignment and W^X. */
+    mk_image(&im, 1); im.ph[0].p_align = 24;
+    CHECK(run(&im) == ELF_ERR_SEG_ALIGN, "non-power-of-two p_align rejected");
+
+    mk_image(&im, 1); im.ph[0].p_offset += 1;
+    CHECK(run(&im) == ELF_ERR_SEG_ALIGN, "incongruent p_align rejected");
+
+    mk_image(&im, 1); im.ph[0].p_vaddr += 0x1000;
+    CHECK(run(&im) == ELF_ERR_SEG_VADDR, "non-identity vaddr rejected");
+
+    mk_image(&im, 1); im.ph[0].p_flags = PF_R | PF_W | PF_X;
+    CHECK(run(&im) == ELF_ERR_SEG_FLAGS, "W+X PT_LOAD rejected");
+
+    mk_image(&im, 1); im.ph[0].p_flags = 0x80;
+    CHECK(run(&im) == ELF_ERR_SEG_FLAGS, "unknown PT_LOAD flags rejected");
+
     mk_image(&im, 1);
+    im.ph[0].p_align  = 0;
     im.ph[0].p_offset = UINT64_MAX - 0x10;
     im.ph[0].p_filesz = 0x20;
     im.ph[0].p_memsz  = 0x20;
@@ -173,6 +194,8 @@ int main(int argc, char **argv)
     /* Physical address arithmetic */
     mk_image(&im, 1);
     im.ph[0].p_paddr  = UINT64_MAX - 0x100;
+    im.ph[0].p_vaddr  = im.ph[0].p_paddr;
+    im.ph[0].p_align  = 0;
     im.ph[0].p_memsz  = 0x200;
     im.ph[0].p_filesz = 0x100;
     im.eh->e_entry    = im.ph[0].p_paddr;
@@ -181,6 +204,8 @@ int main(int argc, char **argv)
     mk_image(&im, 1);
     im.ph[0].p_paddr = UINT64_MAX - 0xFFF;   /* survives +memsz, dies on
                                                 page rounding */
+    im.ph[0].p_vaddr = im.ph[0].p_paddr;
+    im.ph[0].p_align = 0;
     im.ph[0].p_memsz = 0x800;
     im.ph[0].p_filesz = 0x800;
     im.eh->e_entry   = im.ph[0].p_paddr;
@@ -193,9 +218,13 @@ int main(int argc, char **argv)
     mk_image(&im, 1); im.ph[0].p_memsz = 0; im.ph[0].p_filesz = 0;
     CHECK(run(&im) == ELF_ERR_NO_SEGMENTS, "only zero-length segments rejected");
 
+    mk_image(&im, 1); im.ph[0].p_memsz = 0; im.ph[0].p_filesz = 1;
+    CHECK(run(&im) == ELF_ERR_SEG_SIZES, "zero-sized segment with file data rejected");
+
     /* Page-granular overlap */
     mk_image(&im, 2); im.ph[1].p_paddr = im.ph[0].p_paddr + 0x800;
     im.ph[1].p_vaddr = im.ph[1].p_paddr;
+    im.ph[1].p_align = 0;
     CHECK(run(&im) == ELF_ERR_SEG_OVERLAP, "overlapping PT_LOADs rejected");
 
     mk_image(&im, 2); im.ph[1].p_paddr = im.ph[0].p_paddr;  /* identical */
@@ -223,8 +252,17 @@ int main(int argc, char **argv)
     CHECK(run(&im) == ELF_ERR_ENTRY, "entry at segment end rejected");
 
     mk_image(&im, 1);
-    im.eh->e_entry = 0x400000 + 0x7FF;                    /* last byte */
-    CHECK(run(&im) == ELF_OK, "entry at last segment byte accepted");
+    im.eh->e_entry = 0x400000 + 0x7FF;                    /* last file byte */
+    CHECK(run(&im) == ELF_OK, "entry at last file byte accepted");
+
+    mk_image(&im, 1);
+    im.ph[0].p_memsz = 0x1000;                            /* BSS tail */
+    im.eh->e_entry = 0x400000 + 0x800;
+    CHECK(run(&im) == ELF_ERR_ENTRY, "entry in BSS tail rejected");
+
+    mk_image(&im, 1);
+    im.ph[0].p_flags = PF_R;
+    CHECK(run(&im) == ELF_ERR_ENTRY, "entry in non-executable segment rejected");
 
     /* The real build artifact must satisfy the same validator */
     if (argc > 1) {

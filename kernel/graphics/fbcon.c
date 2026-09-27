@@ -1,5 +1,5 @@
 /*
- * SYPAS kernel — framebuffer text console (Phase 2 bring-up console;
+ * SYPAS kernel — framebuffer text console (BOOT-1 bring-up console;
  * disposable once a real graphics stack exists).
  *
  * Direct linear-framebuffer text rendering on the GOP-provided mode.

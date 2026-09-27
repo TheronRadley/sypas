@@ -54,7 +54,7 @@ start:
     jmp     .Lhalt_loop
 
 message:
-    .ascii  "SYPAS 0.1.0 - This machine booted in legacy BIOS mode, but SYPAS requires UEFI firmware (x86_64).\r\n"
+    .ascii  "SYPAS " SYPAS_VERSION " - This machine booted in legacy BIOS mode, but SYPAS requires UEFI firmware (x86_64).\r\n"
     .ascii  "VirtualBox: Settings > System > Motherboard > check 'Enable EFI' and set Base Memory to 2048 MB, then restart the VM.\r\n"
     .ascii  "VMware: Firmware type UEFI. QEMU: boot with OVMF. System halted.\r\n"
     .byte   0

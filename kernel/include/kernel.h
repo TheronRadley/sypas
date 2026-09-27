@@ -3,9 +3,11 @@
 #define SYPAS_KERNEL_H
 
 #include "types.h"
+#include "sypas_version.h"
 #include "../../bootloader/protocols/sypas_bootproto.h"
 
-#define SYPAS_KERNEL_VERSION "0.1.0"
+/* Private bring-up vector.  This is intentionally not a future syscall ABI. */
+#define SYPAS_TEST_VECTOR 0xF0
 
 /* ---- Console output ---------------------------------------------------- */
 /* kprintf fans out to every registered sink (serial always; framebuffer
@@ -69,11 +71,13 @@ static inline u64 rdtsc(void)
 
 /* ---- Physical memory manager --------------------------------------------------- */
 typedef struct pmm_stats {
-    u64 total_pages;      /* pages tracked by the allocator            */
-    u64 free_pages;
-    u64 usable_bytes;     /* total SYPAS_MEM_USABLE bytes at boot      */
-    u64 reserved_bytes;   /* everything else in the map                */
-    u64 bitmap_bytes;
+    u64 usable_pages;     /* usable candidates before PMM reservations  */
+    u64 allocator_pages;  /* candidates after bitmap/low-memory reserve */
+    u64 free_pages;       /* currently free allocator pages             */
+    u64 usable_bytes;     /* total SYPAS_MEM_USABLE bytes in boot map   */
+    u64 reserved_bytes;   /* non-usable, non-MMIO bytes in boot map     */
+    u64 mmio_bytes;       /* SYPAS_MEM_MMIO bytes in boot map           */
+    u64 bitmap_bytes;     /* exact bitmap storage before page rounding  */
 } pmm_stats_t;
 
 void    pmm_init(const sypas_bootinfo_t *bi);

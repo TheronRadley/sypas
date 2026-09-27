@@ -1,7 +1,7 @@
 /*
  * SYPAS kernel — physical memory manager (bitmap page allocator).
  *
- * Phase 3 allocator: one bit per 4 KiB page over the highest usable
+ * BOOT-2 allocator: one bit per 4 KiB page over the highest usable
  * physical address, with a next-fit cursor.  Simple, measurable, and easy
  * to verify; a zoned/buddy design replaces it only when benchmarks show
  * the need (docs/technology-decisions.md, DR-5).
@@ -17,9 +17,10 @@ static u8  *bitmap;          /* 1 = allocated/reserved, 0 = free */
 static u64  bitmap_bytes;
 static u64  highest_page;    /* number of tracked pages          */
 static u64  free_pages;
-static u64  total_usable_pages;
+static u64  usable_pages;    /* candidates before PMM reservations */
+static u64  allocator_pages; /* candidates after PMM reservations  */
 static u64  cursor;          /* next-fit scan position           */
-static u64  usable_bytes, reserved_bytes;
+static u64  usable_bytes, reserved_bytes, mmio_bytes;
 
 static inline void bit_set(u64 page)   { bitmap[page >> 3] |=  (1 << (page & 7)); }
 static inline void bit_clear(u64 page) { bitmap[page >> 3] &= ~(1 << (page & 7)); }
@@ -30,6 +31,11 @@ void pmm_init(const sypas_bootinfo_t *bi)
     const sypas_memmap_entry_t *map = (const void *)bi->memmap;
     u64 n = bi->memmap_count;
 
+    /* pmm_init is currently one-shot, but reset accounting so the meaning
+     * of a later reinitialization remains explicit rather than cumulative. */
+    free_pages = usable_pages = allocator_pages = 0;
+    usable_bytes = reserved_bytes = mmio_bytes = 0;
+
     /* Pass 1: extent of tracked physical memory + usable accounting */
     u64 max_addr = 0;
     for (u64 i = 0; i < n; i++) {
@@ -37,7 +43,9 @@ void pmm_init(const sypas_bootinfo_t *bi)
             usable_bytes += map[i].length;
             if (map[i].base + map[i].length > max_addr)
                 max_addr = map[i].base + map[i].length;
-        } else if (map[i].type != SYPAS_MEM_MMIO) {
+        } else if (map[i].type == SYPAS_MEM_MMIO) {
+            mmio_bytes += map[i].length;
+        } else {
             reserved_bytes += map[i].length;
         }
     }
@@ -87,7 +95,9 @@ void pmm_init(const sypas_bootinfo_t *bi)
             free_pages++;
         }
     }
-    total_usable_pages = free_pages;
+    /* Exactly the page-aligned usable candidates the boot map supplied,
+     * before the allocator claims its bitmap and low-memory safety area. */
+    usable_pages = free_pages;
 
     /* Reserve the bitmap's own pages and the low 1 MiB. */
     u64 bm_first = (u64)bitmap / PAGE_SIZE;
@@ -99,6 +109,7 @@ void pmm_init(const sypas_bootinfo_t *bi)
         if (!bit_test(p)) { bit_set(p); free_pages--; }
     }
 
+    allocator_pages = free_pages;
     cursor = bm_last;
 }
 
@@ -139,11 +150,13 @@ void pmm_free_page(paddr_t addr)
 
 void pmm_get_stats(pmm_stats_t *out)
 {
-    out->total_pages    = total_usable_pages;
-    out->free_pages     = free_pages;
-    out->usable_bytes   = usable_bytes;
-    out->reserved_bytes = reserved_bytes;
-    out->bitmap_bytes   = bitmap_bytes;
+    out->usable_pages    = usable_pages;
+    out->allocator_pages = allocator_pages;
+    out->free_pages      = free_pages;
+    out->usable_bytes    = usable_bytes;
+    out->reserved_bytes  = reserved_bytes;
+    out->mmio_bytes      = mmio_bytes;
+    out->bitmap_bytes    = bitmap_bytes;
 }
 
 /*

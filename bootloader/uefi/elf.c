@@ -12,13 +12,18 @@
 #define ELF_PAGE      4096ULL
 #define ELF_PAGE_MASK (ELF_PAGE - 1)
 
-/* a + b, or 0/false on wraparound */
+/* a + b, or false on wraparound */
 static int add_ok(uint64_t a, uint64_t b, uint64_t *out)
 {
     if (a > UINT64_MAX - b)
         return 0;
     *out = a + b;
     return 1;
+}
+
+static int power_of_two(uint64_t n)
+{
+    return n && !(n & (n - 1));
 }
 
 elf_status_t elf_plan_load(const uint8_t *file, uint64_t fsize,
@@ -46,6 +51,8 @@ elf_status_t elf_plan_load(const uint8_t *file, uint64_t fsize,
         return ELF_ERR_MACHINE;
     if (eh->e_type != ET_EXEC)
         return ELF_ERR_TYPE;
+    if (eh->e_ehsize != sizeof(Elf64_Ehdr))
+        return ELF_ERR_EHSIZE;
 
     /* ---- Program header table ----------------------------------------- */
     if (eh->e_phentsize != sizeof(Elf64_Phdr))
@@ -62,14 +69,40 @@ elf_status_t elf_plan_load(const uint8_t *file, uint64_t fsize,
 
     /* ---- PT_LOAD segments ---------------------------------------------- */
     for (int i = 0; i < eh->e_phnum; i++) {
-        if (ph[i].p_type != PT_LOAD || ph[i].p_memsz == 0)
+        if (ph[i].p_type != PT_LOAD)
+            continue;
+
+        if (ph[i].p_filesz > ph[i].p_memsz)
+            return ELF_ERR_SEG_SIZES;
+
+        /* ELF permits p_align = 0 or 1.  Otherwise it is a power of two
+         * and virtual addresses have the same residue as file offsets.
+         * v1 identity mapping below makes this a physical-address
+         * congruence too. */
+        if (ph[i].p_align > 1 &&
+            (!power_of_two(ph[i].p_align) ||
+             ((ph[i].p_vaddr - ph[i].p_offset) & (ph[i].p_align - 1))))
+            return ELF_ERR_SEG_ALIGN;
+
+        /* SYPAS v1 is explicitly identity-mapped.  This is not a generic
+         * ELF rule; it is a kernel-image contract enforced before load. */
+        if (ph[i].p_vaddr != ph[i].p_paddr)
+            return ELF_ERR_SEG_VADDR;
+
+        /* Preserve exactly the permission intent that VMM will later turn
+         * into page permissions.  v1 refuses W+X rather than normalizing a
+         * dangerous image silently. */
+        if ((ph[i].p_flags & ~(PF_R | PF_W | PF_X)) ||
+            ((ph[i].p_flags & (PF_W | PF_X)) == (PF_W | PF_X)))
+            return ELF_ERR_SEG_FLAGS;
+
+        /* A zero-byte PT_LOAD does not allocate memory, but all of its
+         * structural policy has still been checked above. */
+        if (ph[i].p_memsz == 0)
             continue;
 
         if (plan->nsegs == ELF_MAX_SEGMENTS)
             return ELF_ERR_TOO_MANY_SEGS;
-
-        if (ph[i].p_filesz > ph[i].p_memsz)
-            return ELF_ERR_SEG_SIZES;
 
         /* File range: p_offset + p_filesz must stay inside the file. */
         uint64_t file_end;
@@ -94,6 +127,7 @@ elf_status_t elf_plan_load(const uint8_t *file, uint64_t fsize,
         seg->offset    = ph[i].p_offset;
         seg->filesz    = ph[i].p_filesz;
         seg->memsz     = ph[i].p_memsz;
+        seg->flags     = ph[i].p_flags;
 
         /* Page-granular overlap against every accepted segment: the
          * loader allocates whole pages per segment, so sharing a page
@@ -117,12 +151,18 @@ elf_status_t elf_plan_load(const uint8_t *file, uint64_t fsize,
         return ELF_ERR_TOO_BIG;
 
     /* ---- Entry point ----------------------------------------------------
-     * v1 links vaddr == paddr; the entry must land inside a loaded
-     * segment or the jump at handoff is into unowned memory. */
+     * The handoff must start in actual file-backed executable code, never
+     * in a non-executable segment or a zero-filled BSS tail. */
     plan->entry = eh->e_entry;
     for (int i = 0; i < plan->nsegs; i++) {
         const elf_segment_t *s = &plan->segs[i];
-        if (plan->entry >= s->paddr && plan->entry < s->paddr + s->memsz)
+        uint64_t file_end;
+        /* Defensive repeat of the earlier proof makes this invariant local
+         * to the entry check as well. */
+        if (!add_ok(s->paddr, s->filesz, &file_end))
+            return ELF_ERR_SEG_OVERFLOW;
+        if ((s->flags & PF_X) &&
+            plan->entry >= s->paddr && plan->entry < file_end)
             return ELF_OK;
     }
     return ELF_ERR_ENTRY;
@@ -139,16 +179,20 @@ const char *elf_status_str(elf_status_t st)
     case ELF_ERR_VERSION:       return "bad ELF version";
     case ELF_ERR_MACHINE:       return "not x86_64";
     case ELF_ERR_TYPE:          return "not ET_EXEC";
+    case ELF_ERR_EHSIZE:        return "bad e_ehsize";
     case ELF_ERR_PHENTSIZE:     return "bad e_phentsize";
     case ELF_ERR_PHDR_BOUNDS:   return "program headers outside file";
     case ELF_ERR_SEG_BOUNDS:    return "segment data outside file";
     case ELF_ERR_SEG_SIZES:     return "p_filesz > p_memsz";
+    case ELF_ERR_SEG_ALIGN:     return "bad PT_LOAD alignment";
+    case ELF_ERR_SEG_VADDR:     return "vaddr is not identity-mapped";
+    case ELF_ERR_SEG_FLAGS:     return "unsafe PT_LOAD permissions";
     case ELF_ERR_SEG_OVERFLOW:  return "address arithmetic overflow";
     case ELF_ERR_SEG_OVERLAP:   return "PT_LOAD segments overlap";
     case ELF_ERR_TOO_MANY_SEGS: return "too many PT_LOAD segments";
     case ELF_ERR_NO_SEGMENTS:   return "no loadable segments";
     case ELF_ERR_TOO_BIG:       return "kernel span too large";
-    case ELF_ERR_ENTRY:         return "entry point outside segments";
+    case ELF_ERR_ENTRY:         return "entry not executable file data";
     }
     return "unknown";
 }

@@ -15,109 +15,109 @@ Priority order when requirements conflict:
 7. visual quality
 8. additional features
 
-Architectural principles that serve several of these at once:
+Architectural principles:
 
-- event-driven everything: no polling loops, no idle compositor frames
-  (already true today: the kernel idles in `hlt`, waking only on
-  interrupts);
-- GPU-composited effects rather than CPU-side animation (future phases);
+- event-driven components rather than polling loops or idle compositor
+  frames;
+- a **damage-driven compositor with software and accelerated backends** —
+  acceleration is optional and measured, not assumed;
 - lazy loading over permanent preloading;
-- dynamic quality reduction over feature removal;
+- dynamic quality reduction over feature removal; and
 - modular services over permanently running daemons.
 
 ## Non-negotiable engineering rule
 
 **Real performance over marketing.** No component is described as fast,
-light, or optimized without a measurement recorded in
-`docs/performance.md` (benchmark, test conditions, configuration, method,
-result). No hardware is listed as supported without a test on that
-hardware or an explicit "QEMU/OVMF only" annotation.
+light, or optimized without a measurement recorded in `docs/performance.md`.
+No hardware is listed as supported without a test on that hardware or an
+explicit “QEMU/OVMF only” annotation.
 
 ## Long-term structure
 
-```
+```text
 Firmware (UEFI)
    ↓
 SYPAS Bootloader          — bootloader/
    ↓  SYPAS Boot Protocol (versioned)
 SYPAS Kernel              — kernel/
    ├── CPU / SMP
-   ├── Memory Manager
+   ├── PMM / VMM
    ├── Scheduler
-   ├── IPC
-   ├── Syscalls (SYPAS ABI, not Linux, not POSIX-on-the-wire)
-   ├── Device model / drivers
+   ├── IPC / syscall ABI
+   ├── Device model / DMA / drivers
    ├── Storage → SypasFS → VFS
-   ├── Networking
-   ├── Input
-   ├── Graphics
-   ├── Audio
-   ├── Power
-   └── Security
+   ├── Networking / input / audio / power / security
+   └── Graphics
    ↓
-SYPAS Core Services       — userspace/services/
-   ↓
-SYPAS Graphics / Window System — graphics/
-   ↓
-SYPAS Compositor
-   ↓
-SYPAS UI Toolkit          — ui/
-   ↓
-SYPAS Shell               — shell/
-   ↓
-SYPAS Applications        — apps/
+SYPAS Core Services → Graphics / Window System → Compositor → UI → Shell
 ```
 
 Directories are created **when their first real code lands** — no empty
-scaffolding, no placeholder modules.
+scaffolding or placeholder subsystems.
 
-## Current state (Phase 2 milestone: "SYPAS boots its own kernel")
+## Current milestone: BOOT-2 — hardened boot handoff
 
-Implemented and tested under QEMU/OVMF (see docs/performance.md and
-docs/testing.md for evidence):
+Implemented in the source tree:
 
 | Layer | Status |
 |---|---|
-| UEFI bootloader | ✅ SYPAS-native PE32+ app, no gnu-efi, no Limine |
-| Boot protocol | ✅ SYPAS Boot Protocol v1, versioned, documented |
-| Kernel entry, GDT, IDT, exceptions | ✅ with panic register dumps |
-| Serial debug console | ✅ 16550, loopback self-tested |
-| PIC/PIT interrupts | ✅ delivery verified by counting ticks |
-| Physical page allocator | ✅ bitmap, self-tested, cost measured |
-| Framebuffer console | ✅ GOP linear FB, 8x8 font 2x scale |
-| Virtual memory (kernel-owned page tables) | ❌ next (Phase 4) |
-| Everything above memory | ❌ future phases |
+| UEFI bootloader | SYPAS-native PE32+ app, no gnu-efi or Limine |
+| Loader validation | bounded kernel file, host-tested ELF policy, bounded self-relocation |
+| Boot protocol | versioned SYPAS Boot Protocol v1, mechanically layout-asserted |
+| Ownership map | validated, sorted, exact PT_LOAD ownership ranges |
+| ACPI handoff | validated RSDP pointer, ACPI 2.0 preferred |
+| Kernel entry, GDT, IDT | controlled exception diagnostics; all 256 gates installed |
+| Serial debug console | 16550, loopback self-tested |
+| PIC/PIT interrupts | delivery verified by counting ticks |
+| Physical page allocator | bitmap, self-tested, explicitly accounted statistics |
+| Framebuffer console | GOP linear framebuffer, 8x8 font scaled 2x |
+| Kernel-owned virtual memory | **not implemented — MEM-1 is next** |
 
-### Known v1 limitations (deliberate, documented)
+### Known BOOT-2 limits
 
-1. The kernel runs on the firmware's identity-mapped page tables.
-   EFI boot-services memory is therefore kept reserved
-   (`SYPAS_MEM_FIRMWARE`) until the kernel owns its page tables.
-2. The kernel links at fixed physical 4 MiB; the loader fails loudly if
-   that range is occupied. Position independence or loader-built page
-   tables will remove this (Phase 4).
-3. Single CPU only; the 8259 PIC is a bring-up device that the APIC
-   replaces in the SMP phase.
-4. No TSS/IST yet: a kernel-stack overflow during an exception would
-   triple-fault rather than produce a clean dump.
-5. PIT at 100 Hz is the bring-up timer; the target design is tickless
-   with TSC-deadline/HPET.
+1. The kernel runs on the firmware identity mapping. EFI boot-services memory
+   remains reserved until SYPAS owns CR3.
+2. The kernel links at a fixed physical 4 MiB and the loader fails closed if
+   that range is occupied.
+3. The PIC/PIT path is BSP-only bring-up infrastructure.
+4. TSS/IST emergency stacks do not exist yet; double-fault/stack-fault
+   diagnostics are therefore not robust. They are a required part of MEM-1.
+5. SYPAS has no user/kernel isolation, driver model, or secure-boot policy
+   yet; see `docs/threat-model.md`.
 
-## Development order
+## Named milestones
 
-Boot → CPU → Memory → Interrupts → Timers → Scheduler → Processes →
-Syscalls → Userspace → Storage → Filesystem → Drivers → Graphics →
-Windowing → UI → Shell → Applications → Networking/Audio → Gaming →
-Optimization → Installer/Recovery/Updates → Release.
+Milestones are capability contracts, not an ever-growing phase-number list.
+A milestone is complete only when it builds, runs, handles failure, is tested,
+documented, and measured where performance is claimed.
 
-Every phase must leave a working, tested artifact. A milestone counts as
-done only when it builds, runs, is tested, handles failure, is
-documented, and (where applicable) measured.
+| ID | Milestone | Scope |
+|---|---|---|
+| BOOT-1 | Boot bring-up | bootable UEFI kernel handoff |
+| BOOT-2 | Boot hardening | validated loader, ownership and test contracts |
+| MEM-1 | Memory isolation | page tables, higher half, NX/W^X, TSS/IST, firmware reclaim |
+| MEM-2 | Dynamic kernel memory | VMM-backed heap; PMM remains a separate layer |
+| CPU-1 | APIC/SMP | ACPI MADT, LAPIC/IOAPIC, time source, per-CPU state |
+| EXEC-1 | Kernel execution | kernel threads, context switch, run queue, preemption |
+| ABI-1 | User/kernel contract | address spaces, processes, documented syscall ABI and IPC |
+| IO-1 | Device/DMA core | PCI, resources, interrupts, DMA ownership and block layer |
+| FS-1 | Storage and VFS | storage drivers, VFS and SypasFS |
+| GFX-1 | Compositor | input, software compositor, windows and damage tracking |
+| DESK-1 | Desktop shell | UI toolkit, shell and applications |
 
-## Next milestones
+## Next: MEM-1
 
-1. **Phase 3/4:** kernel-owned page tables, higher-half kernel, W^X
-   enforcement, reclaim of firmware/bootloader memory.
-2. **Phase 5:** kernel heap on top of the PMM.
-3. **Phase 6+:** APIC, HPET/TSC time, then SMP bring-up.
-4. **Phase 9/10/11:** scheduler, processes/threads, SYPAS syscall ABI v1.
+MEM-1 deliberately keeps layers separate:
+
+```text
+PMM (physical frames)
+        ↓
+VMM (virtual mappings and permissions)
+        ↓
+kernel heap
+```
+
+The implementation order is page-table ownership, higher-half mapping,
+NX/W^X, TSS/IST emergency stacks, framebuffer/direct-map policy, then safe
+firmware-memory reclamation. `docs/memory-layout.md` is the design contract
+that must be updated before the first MEM-1 mapping code lands.

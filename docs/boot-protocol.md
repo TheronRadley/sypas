@@ -65,8 +65,8 @@ See the header for exact layout. Summary:
   page-aligned, adjacent same-type ranges coalesced. Types:
   `USABLE`, `RESERVED`, `ACPI_RECLAIM`, `ACPI_NVS`, `MMIO`, `LOADER`
   (bootinfo, memory map, kernel stack, loader image — reclaimable
-  later), `KERNEL` (the loaded kernel image: the loader splits its
-  span out of the loader-allocated ranges and tags it, so the map is a
+  later), `KERNEL` (the exact page ranges occupied by every loaded
+  `PT_LOAD`; holes between segments remain `LOADER`, so the map is a
   real ownership map), `FIRMWARE` (EFI boot/runtime services memory;
   v1 keeps it reserved because the active page tables live there).
 - **fb_*** — GOP linear framebuffer: base, width, height, pitch, and
@@ -74,7 +74,8 @@ See the header for exact layout. Summary:
   R,G,B,X). `SYPAS_FB_NONE` if the GOP mode is blt-only or absent —
   the kernel then runs serial-only.
 - **acpi_rsdp** — physical RSDP address from the EFI configuration
-  table (ACPI 2.0 GUID preferred, 1.0 fallback), 0 if absent.
+  table (ACPI 2.0 GUID preferred, 1.0 fallback), 0 if absent or if the
+  candidate fails RSDP signature, revision, length, or checksum validation.
 - **efi_system_table** — physical address, kept for later runtime
   services support; unused in v1.
 - **kernel_phys_base / kernel_size** — span of loaded PT_LOAD segments.
@@ -89,14 +90,17 @@ See the header for exact layout. Summary:
 ## Kernel loading rules (v1)
 
 - Kernel format: ELF64, `ET_EXEC`, `EM_X86_64`, little-endian.
-- The image is **fully validated before any memory is touched**:
-  `bootloader/uefi/elf.c` (`elf_plan_load()`) proves every header
-  offset, segment file range, size relation (`p_filesz ≤ p_memsz`),
-  physical address computation (overflow-checked), page-granular
-  segment disjointness, total span limit, and that `e_entry` lands
-  inside a loaded segment — then returns a load plan. The loader only
-  executes the plan: allocate, zero, copy. A malformed image is
-  reported (`kernel image rejected: <reason>`) and the loader halts.
+- The kernel file is capped at 64 MiB **before allocation**. Its ELF
+  image is then fully validated before any kernel destination memory is
+  touched: `bootloader/uefi/elf.c` (`elf_plan_load()`) proves every header
+  offset and size, segment file range, `p_filesz ≤ p_memsz`, ELF
+  `p_align` congruence, v1 identity mapping (`p_vaddr == p_paddr`),
+  overflow-free physical ranges, page-granular segment disjointness,
+  non-W+X `PF_*` flags, total span limit, and that `e_entry` is in
+  file-backed executable code. It returns a plan retaining per-segment
+  permission flags for MEM-1 page-table policy. The loader only executes
+  the plan: allocate, zero, copy. A malformed image is reported
+  (`kernel image rejected: <reason>`) and the loader halts.
 - The same validator code is compiled on the build host and
   unit-tested against malformed/truncated/adversarial images
   (`tests/unit/test_elf.c`, run by `make test-unit` under
@@ -106,7 +110,7 @@ See the header for exact layout. Summary:
   remainder zeroed.
 - The SYPAS kernel links at physical 4 MiB. If that range is not free
   the loader reports and halts — it does not silently relocate.
-  (Removed in Phase 4 when the loader builds kernel page tables.)
+  (Removed in MEM-1 when the loader/kernel owns page tables.)
 
 ## ExitBootServices sequence
 
@@ -116,14 +120,20 @@ See the header for exact layout. Summary:
    `DescriptorSize` may exceed our struct — UEFI 2.10 §7.2), free,
    grow, retry (bounded).
 2. All allocation happens **strictly before** the ExitBootServices
-   sequence: after a failed `ExitBootServices`, UEFI permits only
-   `GetMemoryMap` and `ExitBootServices` again.
-3. `GetMemoryMap` → `ExitBootServices` with the **latest** map key;
-   on failure retry the pair (up to 4 attempts).
-4. After success: no firmware calls of any kind; the EFI map is
-   translated into SYPAS format in the pre-allocated buffer, with the
-   kernel image span split out of loader ranges and tagged
-   `SYPAS_MEM_KERNEL`.
+   sequence. The latest EFI map is validated and translated into the
+   pre-allocated SYPAS buffer before the matching handoff attempt.
+3. `GetMemoryMap` → validate/translate → `ExitBootServices` uses the
+   **latest** map key. After a failed `ExitBootServices`, recovery does
+   only `GetMemoryMap` → validate/translate → `ExitBootServices` again,
+   up to four attempts. If that recovery cannot continue, the loader
+   executes `cli; hlt` without printing, stalling, allocating, or touching
+   any other firmware interface.
+4. After success: no firmware calls of any kind. The already-produced map
+   contains exact `PT_LOAD` page ranges tagged `SYPAS_MEM_KERNEL`. The
+   translator canonicalizes firmware descriptor order first (some firmware
+   enumerates high MMIO ahead of lower RAM), then rejects true overlaps and
+   guarantees the output is sorted, non-overlapping, page-aligned,
+   overflow-free, and fully classified before `pmm_init()` sees it.
 
 ## Error handling
 

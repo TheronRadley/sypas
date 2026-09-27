@@ -11,8 +11,8 @@ BOOT-2 hardening work does and does not defend.
 
 The loader bounds the kernel file before allocation, validates the ELF image
 before loading it, requires identity mapping and non-W+X PT_LOAD segments,
-and passes exact loaded ranges into the ownership map. The map translator
-requires sorted, page-aligned, non-overlapping, overflow-free descriptors.
+and passes exact loaded ranges into the ownership map. The map translator canonicalizes descriptor order, rejects true overlaps,
+and produces page-aligned, non-overlapping, overflow-free output.
 The relocator bounds every table and relocation target to its own loaded
 image and fails closed.
 

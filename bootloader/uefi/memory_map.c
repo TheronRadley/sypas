@@ -10,6 +10,10 @@
 #include "memory_map.h"
 
 #define PAGE_SIZE 4096ULL
+/* DescriptorSize is firmware input.  UEFI's base descriptor is 40 bytes;
+ * retain extension bytes when sorting, but refuse a pathological size rather
+ * than placing an unbounded VLA on the handoff stack. */
+#define MAX_EFI_DESCRIPTOR_SIZE 4096U
 
 static int add_ok(uint64_t a, uint64_t b, uint64_t *out)
 {
@@ -25,6 +29,40 @@ static int mul_ok(uint64_t a, uint64_t b, uint64_t *out)
         return 0;
     *out = a * b;
     return 1;
+}
+
+static void copy_bytes(uint8_t *dst, const uint8_t *src, uint64_t length)
+{
+    while (length--)
+        *dst++ = *src++;
+}
+
+/* UEFI describes a set of descriptors but does not give SYPAS a portable
+ * ordering guarantee across firmware implementations.  Canonicalize by
+ * physical start in the pre-allocated raw map buffer.  Insertion sort keeps
+ * this freestanding and tiny; firmware maps are normally a few hundred
+ * entries at most. */
+static void sort_descriptors(EFI_MEMORY_DESCRIPTOR *map, uint64_t count,
+                             uint64_t descriptor_size)
+{
+    uint64_t temporary_words[MAX_EFI_DESCRIPTOR_SIZE / sizeof(uint64_t)];
+    uint8_t *temporary = (uint8_t *)temporary_words;
+    uint8_t *bytes = (uint8_t *)map;
+
+    for (uint64_t i = 1; i < count; i++) {
+        uint8_t *current = bytes + i * descriptor_size;
+        copy_bytes(temporary, current, descriptor_size);
+        uint64_t key = ((EFI_MEMORY_DESCRIPTOR *)temporary)->PhysicalStart;
+        uint64_t j = i;
+        while (j > 0) {
+            uint8_t *previous = bytes + (j - 1) * descriptor_size;
+            if (((EFI_MEMORY_DESCRIPTOR *)previous)->PhysicalStart <= key)
+                break;
+            copy_bytes(bytes + j * descriptor_size, previous, descriptor_size);
+            j--;
+        }
+        copy_bytes(bytes + j * descriptor_size, temporary, descriptor_size);
+    }
 }
 
 static uint32_t efi_to_sypas_memtype(uint32_t type)
@@ -110,7 +148,7 @@ static const elf_segment_t *next_kernel_segment(const elf_load_plan_t *kernel,
 }
 
 sypas_map_status_t sypas_translate_memory_map(
-    const EFI_MEMORY_DESCRIPTOR *efi_map, uint64_t map_size,
+    EFI_MEMORY_DESCRIPTOR *efi_map, uint64_t map_size,
     uint64_t descriptor_size, const elf_load_plan_t *kernel,
     sypas_memmap_entry_t *out, uint64_t out_capacity,
     uint64_t *out_count, sypas_map_diagnostic_t *diagnostic)
@@ -119,9 +157,12 @@ sypas_map_status_t sypas_translate_memory_map(
         *diagnostic = (sypas_map_diagnostic_t){0};
     if (!efi_map || !kernel || !out || !out_count ||
         descriptor_size < sizeof(EFI_MEMORY_DESCRIPTOR) ||
+        descriptor_size > MAX_EFI_DESCRIPTOR_SIZE ||
         descriptor_size % sizeof(uint64_t) ||
         map_size % descriptor_size)
         return SYPAS_MAP_ERR_DESCRIPTOR_SIZE;
+
+    sort_descriptors(efi_map, map_size / descriptor_size, descriptor_size);
 
     uint64_t previous_end = 0;
     uint64_t count = 0;
@@ -163,7 +204,7 @@ sypas_map_status_t sypas_translate_memory_map(
                 diagnostic->end = end;
                 diagnostic->previous_end = previous_end;
             }
-            return SYPAS_MAP_ERR_UNSORTED;
+            return SYPAS_MAP_ERR_RANGE_OVERLAP;
         }
         previous_end = end;
 
@@ -221,7 +262,7 @@ const char *sypas_map_status_str(sypas_map_status_t status)
     case SYPAS_MAP_ERR_ZERO_LENGTH:       return "zero-length memory-map range";
     case SYPAS_MAP_ERR_ADDRESS_ALIGNMENT: return "unaligned memory-map range";
     case SYPAS_MAP_ERR_ADDRESS_OVERFLOW:  return "memory-map address overflow";
-    case SYPAS_MAP_ERR_UNSORTED:          return "overlapping memory-map ranges";
+    case SYPAS_MAP_ERR_RANGE_OVERLAP:          return "overlapping memory-map ranges";
     case SYPAS_MAP_ERR_OUTPUT_FULL:       return "translated memory map is full";
     case SYPAS_MAP_ERR_OUTPUT_OVERFLOW:   return "translated memory-map overflow";
     case SYPAS_MAP_ERR_KERNEL_NOT_TAGGED: return "kernel ranges absent from loader map";

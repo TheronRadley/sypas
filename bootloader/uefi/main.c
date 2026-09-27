@@ -371,7 +371,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE img, EFI_SYSTEM_TABLE *systab)
             &map_diagnostic);
         if (map_status != SYPAS_MAP_OK) {
             if (attempt == 0) {
-                if (map_status == SYPAS_MAP_ERR_UNSORTED) {
+                if (map_status == SYPAS_MAP_ERR_RANGE_OVERLAP) {
                     print(L"\r\nmemory map overlap: descriptor ");
                     print_hex(map_diagnostic.descriptor_index);
                     print(L" range ");

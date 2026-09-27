@@ -129,8 +129,10 @@ See the header for exact layout. Summary:
    executes `cli; hlt` without printing, stalling, allocating, or touching
    any other firmware interface.
 4. After success: no firmware calls of any kind. The already-produced map
-   contains exact `PT_LOAD` page ranges tagged `SYPAS_MEM_KERNEL`; the
-   translator guarantees it is sorted, non-overlapping, page-aligned,
+   contains exact `PT_LOAD` page ranges tagged `SYPAS_MEM_KERNEL`. The
+   translator canonicalizes firmware descriptor order first (some firmware
+   enumerates high MMIO ahead of lower RAM), then rejects true overlaps and
+   guarantees the output is sorted, non-overlapping, page-aligned,
    overflow-free, and fully classified before `pmm_init()` sees it.
 
 ## Error handling

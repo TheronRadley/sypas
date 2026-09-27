@@ -5,8 +5,9 @@
 ```
 UEFI GetMemoryMap
   → loader translates EFI types → SYPAS types
-      (validates sorted/page-aligned/overflow-free descriptors, splits exact
-       PT_LOAD pages from loader ranges, then coalesces same-type neighbors)
+      (canonicalizes firmware descriptor order, validates page-aligned /
+       non-overlapping / overflow-free ranges, splits exact PT_LOAD pages
+       from loader ranges, then coalesces same-type neighbors)
   → sypas_bootinfo.memmap (physical array, boot protocol v1)
   → kernel pmm_init()
 ```

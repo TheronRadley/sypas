@@ -63,12 +63,24 @@ int main(void)
           output[3].base == 0x402000 && output[3].length == 0x1000,
           "second PT_LOAD tagged kernel");
 
+    /* Firmware descriptors are canonicalized by physical address before
+     * validation: OVMF can enumerate a high MMIO window before lower RAM. */
+    elf_load_plan_t no_kernel = {0};
     input[0] = descriptor(EfiConventionalMemory, 0x300000, 1);
     input[1] = descriptor(EfiConventionalMemory, 0x200000, 1);
     CHECK(sypas_translate_memory_map(input, sizeof(input), sizeof(input[0]),
-                                     &kernel, output, 16, &count, 0) ==
-          SYPAS_MAP_ERR_UNSORTED,
-          "unsorted firmware map rejected");
+                                     &no_kernel, output, 16, &count, 0) ==
+          SYPAS_MAP_OK,
+          "unordered firmware descriptors canonicalized");
+    CHECK(count == 2 && output[0].base == 0x200000 && output[1].base == 0x300000,
+          "canonicalized output is physically ordered");
+
+    input[0] = descriptor(EfiConventionalMemory, 0x200000, 2);
+    input[1] = descriptor(EfiConventionalMemory, 0x201000, 1);
+    CHECK(sypas_translate_memory_map(input, sizeof(input), sizeof(input[0]),
+                                     &no_kernel, output, 16, &count, 0) ==
+          SYPAS_MAP_ERR_RANGE_OVERLAP,
+          "overlapping firmware ranges rejected after sorting");
 
     input[0] = descriptor(EfiConventionalMemory, 0x100001, 1);
     CHECK(sypas_translate_memory_map(input, sizeof(input[0]), sizeof(input[0]),

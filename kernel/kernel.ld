@@ -4,7 +4,7 @@
  * v1: statically linked at physical 4 MiB, entered under the firmware's
  * identity mapping (SYPAS Boot Protocol v1).  The loader allocates this
  * exact range with AllocatePages(AllocateAddress); a higher-half virtual
- * layout arrives with the kernel's own page tables in Phase 4.
+ * layout arrives with the kernel's own page tables in MEM-1.
  */
 
 OUTPUT_FORMAT(elf64-x86-64)

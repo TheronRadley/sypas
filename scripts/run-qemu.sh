@@ -2,21 +2,35 @@
 # Boot SYPAS in QEMU under OVMF.
 #
 # Usage: run-qemu.sh [single|lowend|normal|upper] [iso] [extra qemu args...]
-#
-# Profiles come from tests/config/matrix.json — the single source of
-# truth for the machine matrix (do not hardcode CPU/RAM values here).
+# Profiles come from tests/config/matrix.json — the single source of truth.
 
 set -eu
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROFILE="${1:-normal}"
-ISO="${2:-release/sypas-0.1.0.iso}"
+if [ "$#" -ge 2 ]; then
+    ISO="$2"
+else
+    VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+    ISO="$ROOT/release/sypas-$VERSION.iso"
+fi
 shift $(( $# > 2 ? 2 : $# )) || true
 
-QEMU="${QEMU:-$HOME/sysroot/bin/qemu-system-x86_64}"
-OVMF_CODE="${OVMF_CODE:-$HOME/firmware/OVMF_CODE.fd}"
-OVMF_VARS="${OVMF_VARS:-$HOME/firmware/OVMF_VARS.fd}"
+resolve() {
+    python3 "$ROOT/tools/resolve_paths.py" "$1" 2>/dev/null || true
+}
 
-MATRIX="$(dirname "$0")/../tests/config/matrix.json"
+QEMU="${QEMU:-$(resolve qemu)}"
+OVMF_CODE="${OVMF_CODE:-$(resolve ovmf-code)}"
+OVMF_VARS="${OVMF_VARS:-$(resolve ovmf-vars)}"
+
+if [ ! -x "$QEMU" ] || [ ! -f "$OVMF_CODE" ] || [ ! -f "$OVMF_VARS" ]; then
+    echo "QEMU/OVMF unavailable (QEMU=$QEMU OVMF_CODE=$OVMF_CODE OVMF_VARS=$OVMF_VARS)" >&2
+    echo "Run 'make doctor' or set QEMU, OVMF_CODE and OVMF_VARS explicitly." >&2
+    exit 1
+fi
+
+MATRIX="$ROOT/tests/config/matrix.json"
 read -r SMP MEM < <(python3 - "$MATRIX" "$PROFILE" <<'EOF'
 import json, sys
 matrix = json.load(open(sys.argv[1]))

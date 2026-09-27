@@ -13,10 +13,13 @@
  *   RDX = EFI_SYSTEM_TABLE* SystemTable
  *   RSP = 16-byte aligned before the CALL (so RSP % 16 == 8 here)
  *
- * sypas_reloc(base, dynamic) is System V AMD64:
- *   RDI = image load base, RSI = &_DYNAMIC
+ * sypas_reloc(base, image_size, dynamic) is System V AMD64:
+ *   RDI = image load base, RSI = byte size of the loaded image,
+ *   RDX = &_DYNAMIC
  *   Clobbers caller-saved SysV registers; RCX/RDX are caller-saved in
- *   SysV, so they are preserved on the stack across the call.
+ *   SysV, so the firmware arguments are preserved on the stack across
+ *   the call.  The explicit image bound makes relocation metadata unable
+ *   to create an unbounded pre-C initialization memory write.
  *   Returns 0 on success, nonzero if the image contains a relocation
  *   type it cannot apply (build error — refuse to run corrupt code).
  *
@@ -39,7 +42,9 @@ _start:
     subq    $8, %rsp                /* align for SysV call (rsp%16 -> 0) */
 
     leaq    ImageBase(%rip), %rdi   /* actual load base */
-    leaq    _DYNAMIC(%rip),  %rsi   /* dynamic section  */
+    leaq    ImageEnd(%rip),  %rsi   /* one past bounded image */
+    subq    %rdi, %rsi              /* image byte size        */
+    leaq    _DYNAMIC(%rip),  %rdx   /* dynamic section        */
     call    sypas_reloc
     testq   %rax, %rax
     jnz     .Lbad_reloc

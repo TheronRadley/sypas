@@ -335,4 +335,28 @@ typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
 #define EFI_ACPI_10_TABLE_GUID \
     { 0xeb9d2d30, 0x2d88, 0x11d3, {0x9a,0x16,0x00,0x90,0x27,0x3f,0xc1,0x4d} }
 
+/* ---- UEFI 2.10 x86_64 ABI layout contract ---------------------------------
+ *
+ * SYPAS owns these minimal declarations instead of importing gnu-efi/EDK2,
+ * so make the spec offsets executable facts.  The loader uses only these
+ * tables/protocols; changing a field above now fails at compile time rather
+ * than silently calling the wrong firmware function. */
+_Static_assert(sizeof(EFI_TABLE_HEADER) == 24, "UEFI table header layout");
+_Static_assert(sizeof(EFI_MEMORY_DESCRIPTOR) == 40, "UEFI memory descriptor layout");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, AllocatePages) == 40,
+               "UEFI AllocatePages offset");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, GetMemoryMap) == 56,
+               "UEFI GetMemoryMap offset");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, ExitBootServices) == 232,
+               "UEFI ExitBootServices offset");
+_Static_assert(sizeof(EFI_BOOT_SERVICES) == 376, "UEFI boot services size");
+_Static_assert(offsetof(EFI_SYSTEM_TABLE, BootServices) == 96,
+               "UEFI BootServices offset");
+_Static_assert(offsetof(EFI_SYSTEM_TABLE, ConfigurationTable) == 112,
+               "UEFI ConfigurationTable offset");
+_Static_assert(sizeof(EFI_SYSTEM_TABLE) == 120, "UEFI system table size");
+_Static_assert(sizeof(EFI_FILE_PROTOCOL) == 88, "UEFI file protocol size");
+_Static_assert(sizeof(EFI_GRAPHICS_OUTPUT_PROTOCOL) == 32,
+               "UEFI GOP protocol size");
+
 #endif /* SYPAS_EFI_H */

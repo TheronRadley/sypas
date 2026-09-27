@@ -1,4 +1,4 @@
-# SYPAS Kernel (v0.1.0)
+# SYPAS Kernel (BOOT-2 / source version from `VERSION`)
 
 Scope of this document: what exists today. No forward-written fiction —
 future subsystems are listed only in the roadmap section of
@@ -16,7 +16,7 @@ interrupts off, firmware identity paging). It establishes:
   (`bi->stack_base/stack_size`). The kernel keeps this stack (that is
   the contract; a duplicate `.bss` boot stack would waste 64 KiB and
   make the protocol fields dead surface) until it owns page tables and
-  switches to a kernel-owned stack (Phase 4).
+  switches to a kernel-owned stack (MEM-1).
 - zeroed RBP (unwind terminator)
 
 then calls `kmain(const sypas_bootinfo_t *)` which never returns.
@@ -33,9 +33,10 @@ then calls `kmain(const sypas_bootinfo_t *)` which never returns.
 3. **CPU identification** — CPUID vendor/brand/family and the feature
    bits the near-term roadmap needs (TSC, APIC, SSE2, NX, 1G pages).
 4. **GDT** — ring-0 code/data, segments reloaded via `lretq`.
-5. **IDT** — all 32 exception vectors + 16 IRQ vectors + vector 0x80
-   (self-test gate, future syscall vector). Exceptions land in
-   `panic_with_frame` with a complete register dump.
+5. **IDT** — all 256 vectors have gates. Exceptions and 16 PIC IRQs have
+   dedicated dispatch; private vector `0xF0` is the self-test gate; every
+   other vector takes a controlled panic with its true vector number.
+   Exceptions land in `panic_with_frame` with a complete register dump.
 6. **PIC** — remapped to vectors 32–47, fully masked. Spurious IRQ7/
    IRQ15 are detected via the in-service register and handled with the
    8259A's asymmetric rules (no EOI for spurious IRQ7, master-only EOI
@@ -45,7 +46,7 @@ then calls `kmain(const sypas_bootinfo_t *)` which never returns.
    alloc/free cycle cost.
 8. **Framebuffer console** — if the boot protocol reports a usable
    linear framebuffer; otherwise serial-only (still a supported mode).
-9. **Interrupt self-tests** — `int $0x80` dispatch counted, then PIT
+9. **Interrupt self-tests** — private `int $0xF0` dispatch counted, then PIT
    unmasked, `sti`, and a 250 ms window proves ≥25 real timer IRQs
    arrive. A kernel that cannot demonstrate interrupt delivery panics
    rather than printing "Interrupts: OK".

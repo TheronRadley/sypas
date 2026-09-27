@@ -32,7 +32,7 @@ configuration.
 
 SMP note: multi-CPU configs currently verify that the kernel boots and
 runs correctly on the bootstrap processor while additional CPUs remain
-parked by firmware; SYPAS does not start secondary CPUs yet (Phase 8).
+parked by firmware; SYPAS does not start secondary CPUs yet (CPU-1).
 
 ## Physical test matrix (planned, per project rules)
 

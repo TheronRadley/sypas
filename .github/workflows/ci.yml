@@ -63,21 +63,17 @@ jobs:
       - name: Build (warnings are errors)
         run: make WERROR=1 iso
 
-      - name: Host unit tests (ELF validator, boot protocol layout)
+      - name: Host unit tests (ELF, relocation, map, ACPI, boot protocol)
         run: make WERROR=1 test-unit
 
       - name: Media validation (independent ISO/FAT parser + BIOS stub emulation)
         run: make test-media
 
-      - name: Determinism check (two clean builds, identical SHA-256)
+      - name: Reproducibility check (separate checkout, identical SHA-256)
         run: |
           set -e
-          sha1=$(sha256sum release/sypas-*.iso | awk '{print $1}')
-          make clean >/dev/null && make iso >/dev/null
-          sha2=$(sha256sum release/sypas-*.iso | awk '{print $1}')
-          echo "build1=$sha1"; echo "build2=$sha2"
-          test "$sha1" = "$sha2"
-          echo "$sha1" > ci-artifacts/iso.sha256
+          make WERROR=1 test-repro
+          sha256sum release/sypas-*.iso | tee ci-artifacts/iso.sha256
 
       - name: UEFI boot test matrix
         run: |

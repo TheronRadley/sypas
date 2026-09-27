@@ -1,12 +1,12 @@
-# SYPAS Memory Management (Phase 3 state)
+# SYPAS Memory Management (BOOT-2 state)
 
 ## Memory map pipeline
 
 ```
 UEFI GetMemoryMap
   → loader translates EFI types → SYPAS types
-      (splits the kernel image span out of loader ranges and tags it
-       SYPAS_MEM_KERNEL, then coalesces same-type neighbors)
+      (validates sorted/page-aligned/overflow-free descriptors, splits exact
+       PT_LOAD pages from loader ranges, then coalesces same-type neighbors)
   → sypas_bootinfo.memmap (physical array, boot protocol v1)
   → kernel pmm_init()
 ```
@@ -17,7 +17,7 @@ SYPAS type semantics are defined in the boot protocol
 - `SYPAS_MEM_FIRMWARE` (EFI boot+runtime services memory) is *not*
   freed even though boot services ended, because the identity page
   tables the kernel still runs on live there. Reclaim happens in
-  Phase 4 when the kernel owns page tables.
+  MEM-1 when the kernel owns page tables.
 - `SYPAS_MEM_LOADER` (bootinfo, translated map, boot stack, loader
   image) stays reserved until the kernel stops referencing those pages
   — the kernel is actively running on the boot stack in this range.
@@ -55,7 +55,7 @@ Measured behavior: docs/performance.md (§ PMM).
 | no usable RAM in map | panic at init |
 | bitmap doesn't fit any region | panic at init |
 
-## Not implemented yet (Phase 4+)
+## Not implemented yet (MEM-1+)
 
 Kernel page tables, higher-half kernel, W^X, guard pages, user address
-spaces, demand paging, kernel heap (Phase 5 builds on this PMM).
+spaces, demand paging, a VMM-backed kernel heap (MEM-2 builds on this PMM). See `docs/memory-layout.md` for the MEM-1 contract.

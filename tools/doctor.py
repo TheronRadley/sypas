@@ -13,9 +13,10 @@ import argparse
 import os
 import platform
 import re
-import shutil
 import subprocess
 import sys
+
+from resolve_paths import resolve
 
 
 def run_version(cmd):
@@ -37,12 +38,9 @@ def module_version(name):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--qemu",
-                    default=os.path.expanduser("~/sysroot/bin/qemu-system-x86_64"))
-    ap.add_argument("--ovmf-code",
-                    default=os.path.expanduser("~/firmware/OVMF_CODE.fd"))
-    ap.add_argument("--ovmf-vars",
-                    default=os.path.expanduser("~/firmware/OVMF_VARS.fd"))
+    ap.add_argument("--qemu", default=None)
+    ap.add_argument("--ovmf-code", default=None)
+    ap.add_argument("--ovmf-vars", default=None)
     args = ap.parse_args()
 
     core_ok = True
@@ -76,20 +74,22 @@ def main():
           "make test-media (BIOS stub execution test)")
 
     # --- Emulation tier ----------------------------------------------------
-    qemu_path = args.qemu if os.path.exists(args.qemu) \
-        else shutil.which("qemu-system-x86_64")
+    # Explicit values (from make variables or the command line) win; empty
+    # values fall back to the same resolver used by Make and run-qemu.sh.
+    qemu_path = args.qemu or resolve("qemu")
     v = run_version([qemu_path, "--version"]) if qemu_path else None
     check("qemu-system-x86_64", v is not None,
           f"{v} ({qemu_path})" if v else
-          f"not found (looked at {args.qemu} and $PATH) — "
+          "not found by the shared resolver — "
           "set QEMU=/path/to/qemu-system-x86_64",
           "make test-boot / test-kernel-fault / benchmark / run")
 
-    for name, path in (("OVMF_CODE", args.ovmf_code),
-                       ("OVMF_VARS", args.ovmf_vars)):
-        ok = os.path.isfile(path)
+    firmware = (("OVMF_CODE", args.ovmf_code or resolve("ovmf-code")),
+                ("OVMF_VARS", args.ovmf_vars or resolve("ovmf-vars")))
+    for name, path in firmware:
+        ok = bool(path) and os.path.isfile(path)
         check(name, ok, path if ok else
-              f"not found at {path} — set {name}=/path/to/{name}.fd",
+              f"not found by the shared resolver — set {name}=/path/to/{name}.fd",
               "make test-boot / test-kernel-fault / benchmark / run")
 
     kvm = os.path.exists("/dev/kvm")
@@ -99,7 +99,7 @@ def main():
 
     arch = platform.machine()
     check("architecture", arch in ("x86_64", "AMD64"), arch,
-          "host-side unit tests exercise x86_64 boot code", core=False)
+          "native gcc builds the x86_64 loader and kernel", core=True)
 
     # --- Report -------------------------------------------------------------
     width = max(len(r[0]) for r in rows)

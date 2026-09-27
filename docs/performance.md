@@ -14,7 +14,8 @@ instead of quoting their own copies.
 > per the boot protocol), and the loader now tags the kernel image
 > `SYPAS_MEM_KERNEL` in the handoff map. Footprint rows will be
 > re-measured for the next tagged release; boot-time and PMM numbers
-> are regression baselines and are re-validated by CI on every push.
+> are historical regression baselines. CI is configured to re-test them
+> when a workflow runs; no current-tree pass is claimed without its result.
 
 ## Test environment (all measurements below)
 
@@ -75,7 +76,7 @@ bitmap) is not exercised yet — noted in DR-5.
 | Usable RAM reported to allocator | 1998.7 MiB |
 
 The 46 MiB firmware reservation is the current honest cost of not yet
-owning page tables; it is reclaimed in Phase 4 and tracked as a budget
+owning page tables; it is reclaimed in MEM-1 and tracked as a budget
 item, not hidden.
 
 ## Idle CPU (60 s window)

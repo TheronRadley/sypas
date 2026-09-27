@@ -21,18 +21,20 @@ except ImportError as exc:  # pragma: no cover - exercised when dependency is ab
 LOAD_ADDRESS = 0x7C00
 MEMORY_SIZE = 0x10000
 
-EXPECTED = (
-    "SYPAS 0.1.0 - This machine booted in legacy BIOS mode, but SYPAS requires "
-    "UEFI firmware (x86_64).\r\n"
-    "VirtualBox: Settings > System > Motherboard > check 'Enable EFI' and set "
-    "Base Memory to 2048 MB, then restart the VM.\r\n"
-    "VMware: Firmware type UEFI. QEMU: boot with OVMF. System halted.\r\n"
-)
+def expected_message(version):
+    return (
+        f"SYPAS {version} - This machine booted in legacy BIOS mode, but SYPAS requires "
+        "UEFI firmware (x86_64).\r\n"
+        "VirtualBox: Settings > System > Motherboard > check 'Enable EFI' and set "
+        "Base Memory to 2048 MB, then restart the VM.\r\n"
+        "VMware: Firmware type UEFI. QEMU: boot with OVMF. System halted.\r\n"
+    )
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--stub", required=True)
+    ap.add_argument("--version", required=True)
     args = ap.parse_args()
     code = Path(args.stub).read_bytes()
     if len(code) != 2048:
@@ -74,7 +76,7 @@ def main():
         raise AssertionError(f"Unicorn could not execute BIOS stub: {exc}") from exc
 
     actual = bytes(output).decode("ascii")
-    if actual != EXPECTED:
+    if actual != expected_message(args.version):
         raise AssertionError(f"BIOS diagnostic output mismatch:\n{actual!r}")
     if not reached_hlt:
         raise AssertionError("BIOS diagnostic stub did not reach HLT")

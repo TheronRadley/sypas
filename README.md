@@ -4,7 +4,7 @@ SYPAS is a from-scratch operating system. It has its own UEFI bootloader, boot p
 
 The goal is a modern, polished desktop that runs well on older, low-end x86_64 machines.
 
-**Current state: Phase 2 complete. SYPAS boots its own kernel.**
+**Current state: BOOT-2 complete — a hardened UEFI handoff to SYPAS's own kernel. MEM-1 (memory isolation) is next.**
 
 ```text
 UEFI firmware
@@ -28,17 +28,17 @@ SYPAS kernel            (kernel/, x86_64)
 
 All of the claims below are tested. See `docs/performance.md` for test conditions and results.
 
-* **SYPAS UEFI loader:** loads `\SYPAS\KERNEL.ELF` from the boot volume, gathers the memory map, GOP framebuffer, and ACPI RSDP, exits boot services, and hands control to the kernel through SYPAS Boot Protocol v1.
+* **SYPAS UEFI loader:** caps and validates `\SYPAS\KERNEL.ELF`, loads exact `PT_LOAD` ranges, validates the firmware memory map and ACPI RSDP, exits boot services through a recovery-safe handoff, and transfers control through SYPAS Boot Protocol v1.
 
-* **SYPAS kernel:** GDT, IDT and exception handlers with full register-dump panics, PIC remapping, a 100 Hz PIT verified by counting real interrupts, software-interrupt dispatch self-tests, a bitmap physical page allocator with alloc/free/uniqueness self-tests, framebuffer text console, and serial console.
+* **SYPAS kernel:** GDT, a fully populated 256-vector IDT with controlled unexpected-vector diagnostics, PIC remapping, a 100 Hz PIT verified by counting real interrupts, a private software-interrupt self-test, a bitmap physical page allocator with explicit accounting and alloc/free/uniqueness self-tests, framebuffer text console, and serial console.
 
 * **Reproducible boot media:** deterministic FAT16 ESP + dual-entry El Torito ISO built with SYPAS's own tooling (`tools/mkfat.py`, `tools/mkiso.py`). Legacy BIOS selects a diagnostic stub. UEFI selects the real ESP.
 
 * **Automated boot test matrix:** boots every configuration in `tests/config/matrix.json` (the single source of truth for the machine matrix) and produces machine-readable results with `make test-boot`; `make test-kernel-fault` proves the panic path with a fault-injected build.
 
-* **Host-side unit tests:** the loader's ELF validator and the boot protocol layout are unit-tested on the build host (`make test-unit`, ASan/UBSan) — the exact code that judges the kernel image at boot is exercised against malformed images without booting anything.
+* **Host-side unit tests:** the loader's ELF validator, bounded relocator, UEFI→SYPAS memory-map translator, ACPI RSDP validator, and boot-protocol layout are unit-tested on the build host (`make test-unit`, ASan/UBSan where applicable).
 
-* **CI:** every push builds with `-Werror`, runs the unit/media/boot/fault test tiers, and verifies that two clean builds produce byte-identical images (`.github/workflows/ci.yml`).
+* **CI configured:** `.github/workflows/ci.yml` builds with `-Werror`, runs unit/media/boot/fault tiers, and checks deterministic output from a separate checkout. Until a workflow result is visible for a revision, this is a configured test plan—not a claim that the revision has passed CI.
 
 ## What does NOT exist yet
 
@@ -60,21 +60,20 @@ make doctor     # check the dev environment, explain what's missing
 make test       # run everything feasible on this machine
 make run        # boot in QEMU (normal profile from tests/config/matrix.json)
 make run-lowend # boot with the low-end profile
-make test-unit  # host unit tests: ELF validator + boot protocol layout
+make test-unit  # host unit tests: ELF, relocator, memory map, ACPI, protocol
 make test-media # ISO/FAT/catalog checks + Unicorn BIOS-stub test
 make test-boot  # automated UEFI boot matrix, JSON output
 make test-kernel-fault # fault-injected build must panic truthfully
+make test-repro # compare ISO from this checkout with a second checkout
 ```
 
-Built ISOs land in `release/` (gitignored — Git holds source; release images are published as GitHub Release assets and are byte-reproducible from source, see `release/README.md`).
+Built ISOs land in `release/` and are gitignored. A fresh clone has no binary artifact: run `make iso`, then `make run`, or use a tagged GitHub Release **only after one is published**. `VERSION` is the sole source for the development image name; see `docs/release-process.md`.
 
-Try it on a UEFI x86_64 VM:
+Try it on a UEFI x86_64 VM after building:
 
 ```text
-qemu-system-x86_64 -machine q35 -m 2048 -smp 2 \
-  -drive if=pflash,format=raw,readonly=on,file=OVMF_CODE.fd \
-  -drive if=pflash,format=raw,file=OVMF_VARS.fd \
-  -cdrom release/sypas-0.1.0.iso -serial stdio
+make iso
+QEMU=qemu-system-x86_64 OVMF_CODE=OVMF_CODE.fd OVMF_VARS=OVMF_VARS.fd make run-lowend
 ```
 
 ## VirtualBox (legacy BIOS warning)
@@ -86,7 +85,7 @@ Before starting the VM:
 1. Open **Settings > System > Motherboard**.
 2. Check **Enable EFI (special OSes only)**.
 3. Set **Base Memory** to **2048 MB** or more, then restart the VM.
-4. Attach `release/sypas-0.1.0.iso` as the optical disk.
+4. Run `make iso`, then attach the generated `release/sypas-<version>.iso` as the optical disk.
 
 For VMware, select **Firmware type: UEFI**.
 

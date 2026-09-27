@@ -48,19 +48,19 @@ How to replace later.
 
 ## DR-3: v1 kernel runs on firmware identity mapping, linked at 4 MiB
 
-- **Decision:** defer kernel-owned page tables to Phase 4; keep EFI
+- **Decision:** defer kernel-owned page tables to MEM-1; keep EFI
   boot-services memory reserved meanwhile; kernel is non-PIE at a fixed
   physical address the loader allocates explicitly.
 - **Why:** smallest honest step to a running, testable kernel; page tables
   deserve their own tested phase rather than a rushed version.
 - **RAM cost:** real — firmware memory stays reserved (measured ~66 MiB
   of 2 GiB held by `SYPAS_MEM_FIRMWARE` + loader under OVMF; see
-  docs/performance.md). Reclaimed in Phase 4.
+  docs/performance.md). Reclaimed in MEM-1.
 - **Disadvantages:** no W^X yet, no higher-half, fixed-base fragility
   (loader fails loudly if 4 MiB is taken — has not occurred on OVMF).
 - **Alternatives:** loader-built page tables now. Rejected: increases
   the untested surface of the very first boot milestone.
-- **Replace later:** Phase 4 builds kernel page tables, moves the kernel
+- **Replace later:** MEM-1 builds kernel page tables, moves the kernel
   higher-half, reclaims firmware + loader memory.
 
 ## DR-4: Bring-up interrupts on 8259 PIC + PIT (100 Hz)

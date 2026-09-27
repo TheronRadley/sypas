@@ -1,33 +1,33 @@
 # SYPAS release artifacts
 
-Built ISOs are **not tracked in Git**. Git holds source; binaries are
-published as GitHub Release assets on tagged releases. `make iso`
-writes the image here (`release/sypas-<version>.iso`), and the path is
-gitignored.
+Built ISOs are **not tracked in Git**. Git holds source; `make iso` writes
+`release/sypas-<version>.iso`, where `<version>` comes only from the repository
+root `VERSION` file. This directory is intentionally empty in a fresh clone.
 
-## Reproducing a release image
+There is **no published tagged SYPAS release in this source tree yet**. A
+`-dev` image is a development artifact, not a historical release and not a
+substitute for a GitHub Release asset.
 
-SYPAS images are byte-reproducible:
+## Reproducing an image
 
+SYPAS image tooling honors the reproducible-builds `SOURCE_DATE_EPOCH`
+convention and falls back to a fixed epoch (`1758801600`, 2025-09-25
+12:00:00 UTC) when it is unset. The release-grade claim is:
+
+```text
+same committed source
++ same toolchain
++ same SOURCE_DATE_EPOCH
++ different checkout directory
+= identical image
 ```
-same source
-+ same toolchain (docs/toolchain.md)
-+ same SOURCE_DATE_EPOCH (or the documented fallback)
-= same image
-```
 
-`tools/mkfat.py` and `tools/mkiso.py` honor the reproducible-builds
-`SOURCE_DATE_EPOCH` convention and fall back to a fixed epoch
-(`1758801600` = 2025-09-25 12:00:00 UTC) when it is unset, so a plain
-`make iso` is deterministic with no environment setup.
+`make test-repro` performs the distinct-checkout comparison from a committed
+working tree. CI performs the equivalent check and records the SHA-256 only
+when its workflow actually runs.
 
-## Checksums
+## Publishing a release
 
-| Artifact | SHA-256 | Notes |
-|---|---|---|
-| sypas-0.1.0.iso | `3cb2a6d07fbc543f45b3dbed9f0aeb0b0cdcb352510863c2fdfeda2c95e00d61` | last ISO built from the pre-hardening tree (was tracked in Git before this file existed) |
-
-Images built from the current tree differ from 0.1.0 (boot-hardening
-changes); the 0.2.0 checksum is recorded when 0.2.0 is tagged and its
-ISO is attached to the GitHub Release together with `SHA256SUMS`,
-`toolchain.txt`, and the boot-test JSON for that build.
+Follow `docs/release-process.md`: set the final `VERSION`, test, tag the exact
+source revision, and attach the ISO with `SHA256SUMS`, toolchain report, and
+boot-test evidence. Do not add the ISO itself to Git.

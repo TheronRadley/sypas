@@ -1,7 +1,7 @@
 /*
  * SYPAS kernel — initialization.
  *
- * Phase 2 milestone: every status line printed below corresponds to a
+ * BOOT-2 milestone: every status line printed below corresponds to a
  * subsystem that really initialized (or a check that really ran).  If a
  * mandatory step fails the kernel panics instead of pretending.
  *
@@ -13,7 +13,7 @@
 
 #include "include/kernel.h"
 
-extern volatile u64 isr_test_hits;   /* idt.c, bumped by int $0x80 */
+extern volatile u64 isr_test_hits;   /* idt.c, bumped by private test vector */
 
 static const char *memtype_name(u32 t)
 {
@@ -35,7 +35,7 @@ void kmain(const sypas_bootinfo_t *bi)
     bool serial_ok = serial_init();
     console_register(serial_putc);
 
-    kprintf("\nSYPAS KERNEL %s\n", SYPAS_KERNEL_VERSION);
+    kprintf("\nSYPAS KERNEL %s\n", SYPAS_VERSION);
     kprintf("============\n\nBooting SYPAS...\n\n");
     if (serial_ok)
         kprintf("[uart] COM1 115200 8N1, loopback self-test passed\n");
@@ -78,7 +78,7 @@ void kmain(const sypas_bootinfo_t *bi)
     kprintf("[gdt ] kernel GDT loaded (ring0 code/data), segments reloaded\n");
 
     idt_init();
-    kprintf("[idt ] 256-entry IDT: 32 exceptions, 16 IRQs, 1 test gate\n");
+    kprintf("[idt ] 256-entry IDT: 32 exceptions, 16 IRQs, private test gate, defaults armed\n");
 
     pic_init();
     kprintf("[pic ] 8259 remapped to vectors 32-47, all IRQs masked\n");
@@ -99,9 +99,10 @@ void kmain(const sypas_bootinfo_t *bi)
     pmm_init(bi);
     pmm_stats_t st;
     pmm_get_stats(&st);
-    kprintf("[pmm ] bitmap allocator: %lu pages tracked, %lu free, "
-            "bitmap %lu KiB\n",
-            st.total_pages, st.free_pages, st.bitmap_bytes / 1024);
+    kprintf("[pmm ] bitmap allocator: %lu usable candidates, %lu allocator pages, "
+            "%lu free, bitmap %lu KiB\n",
+            st.usable_pages, st.allocator_pages, st.free_pages,
+            st.bitmap_bytes / 1024);
     if (!pmm_selftest())
         panic("pmm: self-test failed");
 
@@ -120,12 +121,12 @@ void kmain(const sypas_bootinfo_t *bi)
 
     /* --- Interrupt self-tests -------------------------------------------------- */
     u64 hits_before = isr_test_hits;
-    __asm__ volatile("int $0x80");
-    __asm__ volatile("int $0x80");
+    __asm__ volatile("int $0xF0");
+    __asm__ volatile("int $0xF0");
     if (isr_test_hits != hits_before + 2)
         panic("idt: software interrupt dispatch failed (%lu hits)",
               isr_test_hits);
-    kprintf("[int ] software interrupt dispatch verified (int 0x80 x2)\n");
+    kprintf("[int ] software interrupt dispatch verified (private vector 0xF0 x2)\n");
 
     pit_init();
     __asm__ volatile("sti");

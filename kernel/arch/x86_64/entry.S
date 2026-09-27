@@ -17,7 +17,7 @@
  * allocating a second 64 KiB stack in .bss would waste memory and
  * make stack_base/stack_size dead protocol surface.  The kernel
  * switches to a kernel-owned stack when it builds its own page
- * tables (Phase 4).
+ * tables (MEM-1).
  *
  * kmain() never returns; if it does, halt forever.
  */

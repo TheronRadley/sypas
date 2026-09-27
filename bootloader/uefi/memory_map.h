@@ -8,6 +8,13 @@
 #include "elf.h"
 #include "../protocols/sypas_bootproto.h"
 
+typedef struct {
+    uint64_t descriptor_index;
+    uint64_t base;
+    uint64_t end;
+    uint64_t previous_end;
+} sypas_map_diagnostic_t;
+
 typedef enum {
     SYPAS_MAP_OK = 0,
     SYPAS_MAP_ERR_DESCRIPTOR_SIZE,
@@ -35,7 +42,7 @@ sypas_map_status_t sypas_translate_memory_map(
     const EFI_MEMORY_DESCRIPTOR *efi_map, uint64_t map_size,
     uint64_t descriptor_size, const elf_load_plan_t *kernel,
     sypas_memmap_entry_t *out, uint64_t out_capacity,
-    uint64_t *out_count);
+    uint64_t *out_count, sypas_map_diagnostic_t *diagnostic);
 
 const char *sypas_map_status_str(sypas_map_status_t status);
 

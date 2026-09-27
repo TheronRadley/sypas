@@ -365,12 +365,26 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE img, EFI_SYSTEM_TABLE *systab)
         }
 
         uint64_t smap_count = 0;
+        sypas_map_diagnostic_t map_diagnostic;
         sypas_map_status_t map_status = sypas_translate_memory_map(
-            efimap, sz, dsz, &kernel_plan, smap, sypas_cap, &smap_count);
+            efimap, sz, dsz, &kernel_plan, smap, sypas_cap, &smap_count,
+            &map_diagnostic);
         if (map_status != SYPAS_MAP_OK) {
-            if (attempt == 0)
+            if (attempt == 0) {
+                if (map_status == SYPAS_MAP_ERR_UNSORTED) {
+                    print(L"\r\nmemory map overlap: descriptor ");
+                    print_hex(map_diagnostic.descriptor_index);
+                    print(L" range ");
+                    print_hex(map_diagnostic.base);
+                    print(L"..");
+                    print_hex(map_diagnostic.end);
+                    print(L" follows end ");
+                    print_hex(map_diagnostic.previous_end);
+                    print(L"\r\n");
+                }
                 die_ascii(L"memory map rejected", sypas_map_status_str(map_status),
                           EFI_LOAD_ERROR);
+            }
             halt_after_exit_boot_services();
         }
         bi->memmap = (uint64_t)smap;

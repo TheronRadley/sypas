@@ -113,8 +113,10 @@ sypas_map_status_t sypas_translate_memory_map(
     const EFI_MEMORY_DESCRIPTOR *efi_map, uint64_t map_size,
     uint64_t descriptor_size, const elf_load_plan_t *kernel,
     sypas_memmap_entry_t *out, uint64_t out_capacity,
-    uint64_t *out_count)
+    uint64_t *out_count, sypas_map_diagnostic_t *diagnostic)
 {
+    if (diagnostic)
+        *diagnostic = (sypas_map_diagnostic_t){0};
     if (!efi_map || !kernel || !out || !out_count ||
         descriptor_size < sizeof(EFI_MEMORY_DESCRIPTOR) ||
         descriptor_size % sizeof(uint64_t) ||
@@ -154,8 +156,15 @@ sypas_map_status_t sypas_translate_memory_map(
         if (!mul_ok(descriptor->NumberOfPages, PAGE_SIZE, &length) ||
             !add_ok(descriptor->PhysicalStart, length, &end))
             return SYPAS_MAP_ERR_ADDRESS_OVERFLOW;
-        if (offset && descriptor->PhysicalStart < previous_end)
+        if (offset && descriptor->PhysicalStart < previous_end) {
+            if (diagnostic) {
+                diagnostic->descriptor_index = offset / descriptor_size;
+                diagnostic->base = descriptor->PhysicalStart;
+                diagnostic->end = end;
+                diagnostic->previous_end = previous_end;
+            }
             return SYPAS_MAP_ERR_UNSORTED;
+        }
         previous_end = end;
 
         uint32_t type = efi_to_sypas_memtype(descriptor->Type);

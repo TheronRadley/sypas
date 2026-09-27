@@ -48,7 +48,7 @@ int main(void)
     input[0] = descriptor(EfiConventionalMemory, 0x100000, 16);
     input[1] = descriptor(EfiLoaderData, 0x400000, 3);
     CHECK(sypas_translate_memory_map(input, sizeof(input), sizeof(input[0]),
-                                     &kernel, output, 16, &count) == SYPAS_MAP_OK,
+                                     &kernel, output, 16, &count, 0) == SYPAS_MAP_OK,
           "well-formed EFI map translated");
     CHECK(count == 4, "exact PT_LOAD ranges split loader descriptor");
     CHECK(output[0].type == SYPAS_MEM_USABLE && output[0].base == 0x100000,
@@ -66,37 +66,37 @@ int main(void)
     input[0] = descriptor(EfiConventionalMemory, 0x300000, 1);
     input[1] = descriptor(EfiConventionalMemory, 0x200000, 1);
     CHECK(sypas_translate_memory_map(input, sizeof(input), sizeof(input[0]),
-                                     &kernel, output, 16, &count) ==
+                                     &kernel, output, 16, &count, 0) ==
           SYPAS_MAP_ERR_UNSORTED,
           "unsorted firmware map rejected");
 
     input[0] = descriptor(EfiConventionalMemory, 0x100001, 1);
     CHECK(sypas_translate_memory_map(input, sizeof(input[0]), sizeof(input[0]),
-                                     &kernel, output, 16, &count) ==
+                                     &kernel, output, 16, &count, 0) ==
           SYPAS_MAP_ERR_ADDRESS_ALIGNMENT,
           "unaligned firmware range rejected");
 
     input[0] = descriptor(EfiConventionalMemory, 0x100000, UINT64_MAX);
     CHECK(sypas_translate_memory_map(input, sizeof(input[0]), sizeof(input[0]),
-                                     &kernel, output, 16, &count) ==
+                                     &kernel, output, 16, &count, 0) ==
           SYPAS_MAP_ERR_ADDRESS_OVERFLOW,
           "firmware page-count overflow rejected");
 
     input[0] = descriptor(EfiConventionalMemory, 0x100000, 1);
     CHECK(sypas_translate_memory_map(input, sizeof(input[0]), sizeof(input[0]) - 8,
-                                     &kernel, output, 16, &count) ==
+                                     &kernel, output, 16, &count, 0) ==
           SYPAS_MAP_ERR_DESCRIPTOR_SIZE,
           "short descriptor stride rejected");
 
     input[0] = descriptor(EfiLoaderData, 0x400000, 3);
     CHECK(sypas_translate_memory_map(input, sizeof(input[0]), sizeof(input[0]),
-                                     &kernel, output, 2, &count) ==
+                                     &kernel, output, 2, &count, 0) ==
           SYPAS_MAP_ERR_OUTPUT_FULL,
           "bounded output buffer enforced");
 
     input[0] = descriptor(EfiConventionalMemory, 0x400000, 3);
     CHECK(sypas_translate_memory_map(input, sizeof(input[0]), sizeof(input[0]),
-                                     &kernel, output, 16, &count) ==
+                                     &kernel, output, 16, &count, 0) ==
           SYPAS_MAP_ERR_KERNEL_NOT_TAGGED,
           "kernel ranges must originate in loader memory");
 

@@ -77,8 +77,28 @@ jobs:
 
       - name: UEFI boot test matrix
         run: |
+          set +e
           make test-boot QEMU="$QEMU" OVMF_CODE="$OVMF_CODE" OVMF_VARS="$OVMF_VARS" \
             | tee ci-artifacts/boot-test.json
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            # Put a compact serial tail in a check annotation as well as the
+            # artifact: a failed early boot must be diagnosable without first
+            # downloading a ZIP from Actions.
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raw = Path("ci-artifacts/boot-test.json").read_text(errors="replace")
+          report = json.loads(raw[raw.find("{"):])
+          tails = []
+          for result in report.get("results", []):
+              log = Path(result["serial_log"])
+              text = log.read_text(errors="replace") if log.exists() else "(no serial log)"
+              tails.append(f"{result['config']}: {text[-900:].replace(chr(10), ' | ')}")
+          print("::error title=UEFI boot transcript::" + " || ".join(tails))
+          PY
+          fi
+          exit "$status"
 
       - name: Fault injection (kernel #UD must panic truthfully)
         run: |
